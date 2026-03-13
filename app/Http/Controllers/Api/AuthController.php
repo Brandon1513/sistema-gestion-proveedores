@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\DB;
 class AuthController extends Controller
 {
     /**
-     * Login de usuarios internos
+     * Login de usuarios internos y proveedores
      */
     public function login(LoginRequest $request): JsonResponse
     {
@@ -26,6 +26,36 @@ class AuthController extends Controller
             return response()->json([
                 'message' => 'Credenciales inválidas',
             ], 401);
+        }
+
+        // ✅ Verificar si el usuario interno está activo
+        if (isset($user->is_active) && !$user->is_active) {
+            return response()->json([
+                'message' => 'Tu cuenta está inactiva. Contacta al administrador del sistema.',
+                'error_code' => 'ACCOUNT_INACTIVE',
+                'contact_email' => 'brandon.devora@dasavena.com',
+            ], 403);
+        }
+
+        // ✅ Si es proveedor, verificar el status de su empresa
+        if ($user->hasRole('proveedor')) {
+            $provider = Provider::where('email', $user->email)->first();
+
+            if ($provider && $provider->status === 'inactive') {
+                return response()->json([
+                    'message' => 'Tu cuenta de proveedor está inactiva. Por favor contacta al administrador del sistema.',
+                    'error_code' => 'PROVIDER_INACTIVE',
+                    'contact_email' => 'brandon.devora@dasavena.com',
+                ], 403);
+            }
+
+            if ($provider && $provider->status === 'rejected') {
+                return response()->json([
+                    'message' => 'Tu solicitud como proveedor fue rechazada. Por favor contacta al administrador del sistema.',
+                    'error_code' => 'PROVIDER_REJECTED',
+                    'contact_email' => 'brandon.devora@dasavena.com',
+                ], 403);
+            }
         }
 
         $token = $user->createToken('auth-token')->plainTextToken;
@@ -48,7 +78,6 @@ class AuthController extends Controller
      */
     public function registerProvider(RegisterProviderRequest $request): JsonResponse
     {
-        // Verificar invitación
         $invitation = ProviderInvitation::where('token', $request->token)
             ->where('status', 'pending')
             ->first();
@@ -62,7 +91,6 @@ class AuthController extends Controller
         try {
             DB::beginTransaction();
 
-            // Crear usuario para el proveedor
             $user = User::create([
                 'name' => $request->name,
                 'email' => $invitation->email,
@@ -72,17 +100,15 @@ class AuthController extends Controller
 
             $user->assignRole('proveedor');
 
-            // Crear proveedor
             $provider = Provider::create([
                 'provider_type_id' => $invitation->provider_type_id,
                 'business_name' => $request->business_name,
-                'rfc' => $request->rfc,
+                'rfc' => strtoupper($request->rfc),
                 'email' => $invitation->email,
                 'status' => 'pending',
                 'created_by' => $invitation->invited_by,
             ]);
 
-            // Marcar invitación como aceptada
             $invitation->markAsAccepted($provider);
 
             DB::commit();

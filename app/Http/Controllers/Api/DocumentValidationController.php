@@ -26,7 +26,6 @@ class DocumentValidationController extends Controller
         ])
         ->where('status', 'pending');
 
-        // Filtros
         if ($request->has('search') && $request->search) {
             $search = $request->search;
             $query->whereHas('provider', function ($q) use ($search) {
@@ -47,33 +46,26 @@ class DocumentValidationController extends Controller
             });
         }
 
-        // Obtener documentos
         $documents = $query->latest()->get();
 
-        // Calcular días hasta vencimiento para cada documento
         $documents = $documents->map(function ($doc) {
             $doc->days_until_expiry = null;
-            
             if ($doc->expiry_date) {
                 $expiryDate = Carbon::parse($doc->expiry_date);
                 $today = Carbon::now();
-                
-                // Días hasta vencer (negativo si ya venció)
                 $doc->days_until_expiry = $today->diffInDays($expiryDate, false);
             }
-            
             return $doc;
         });
 
-        // Calcular estadísticas
         $stats = [
             'total_pending' => $documents->count(),
             'urgent' => $documents->filter(function ($doc) {
                 return $doc->days_until_expiry !== null && $doc->days_until_expiry <= 7 && $doc->days_until_expiry >= 0;
             })->count(),
             'expiring_soon' => $documents->filter(function ($doc) {
-                return $doc->days_until_expiry !== null && 
-                       $doc->days_until_expiry > 7 && 
+                return $doc->days_until_expiry !== null &&
+                       $doc->days_until_expiry > 7 &&
                        $doc->days_until_expiry <= 15;
             })->count(),
         ];
@@ -86,6 +78,7 @@ class DocumentValidationController extends Controller
 
     /**
      * Validar documento (aprobar o rechazar)
+     * ✅ Con activación/desactivación automática del proveedor
      */
     public function validate(Request $request, $providerId, $documentId): JsonResponse
     {
@@ -99,17 +92,12 @@ class DocumentValidationController extends Controller
         ]);
 
         try {
-            // Buscar el documento
             $document = ProviderDocument::where('id', $documentId)
                 ->where('provider_id', $providerId)
                 ->firstOrFail();
 
-            // Actualizar estado del documento
-            $document->update([
-                'status' => $validated['status'],
-            ]);
+            $document->update(['status' => $validated['status']]);
 
-            // Crear registro de validación
             $validation = DocumentValidation::create([
                 'provider_document_id' => $document->id,
                 'validated_by' => auth()->id(),
@@ -118,40 +106,47 @@ class DocumentValidationController extends Controller
                 'validated_at' => now(),
             ]);
 
-            // Cargar relaciones necesarias
             $document->load(['documentType', 'provider.providerType', 'uploadedBy']);
             $validation->load('validatedBy');
 
-            // 📧 ENVIAR NOTIFICACIÓN POR EMAIL AL PROVEEDOR
-            try {
-                $providerEmail = $document->provider->email;
+            $provider = $document->provider;
+            $providerActivated = false;
 
-                if ($providerEmail) {
-                    Mail::to($providerEmail)->send(
+            // ✅ Aprobación: verificar si se activa el proveedor
+            if ($validated['status'] === 'approved' && $provider->status === 'pending') {
+                $providerActivated = $this->checkAndActivateProvider($provider);
+            }
+
+            // ✅ Rechazo: si el proveedor estaba activo, regresa a pendiente
+            if ($validated['status'] === 'rejected' && $provider->status === 'active') {
+                $provider->update(['status' => 'pending']);
+                \Log::info("Proveedor {$provider->id} ({$provider->business_name}) regresó a pendiente por documento rechazado");
+            }
+
+            // 📧 Email al proveedor
+            try {
+                if ($provider->email) {
+                    Mail::to($provider->email)->send(
                         new DocumentValidatedMail($document, $validation)
                     );
-                    
-                    \Log::info("Email de validación enviado a: {$providerEmail} - Status: {$validated['status']}");
-                } else {
-                    \Log::warning("Proveedor {$document->provider->id} no tiene email registrado");
+                    \Log::info("Email de validación enviado a: {$provider->email} - Status: {$validated['status']}");
                 }
             } catch (\Exception $e) {
                 \Log::error('Error al enviar email de validación: ' . $e->getMessage());
-                // No lanzar excepción para no interrumpir el flujo
             }
-            
+
             return response()->json([
-                'message' => $validated['status'] === 'approved' 
-                    ? 'Documento aprobado exitosamente' 
+                'message' => $validated['status'] === 'approved'
+                    ? 'Documento aprobado exitosamente'
                     : 'Documento rechazado',
                 'document' => $document,
                 'validation' => $validation,
+                'provider_activated' => $providerActivated,
+                'provider_status' => $provider->fresh()->status,
             ]);
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            return response()->json([
-                'message' => 'Documento no encontrado',
-            ], 404);
+            return response()->json(['message' => 'Documento no encontrado'], 404);
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Error al validar el documento',
@@ -161,29 +156,56 @@ class DocumentValidationController extends Controller
     }
 
     /**
+     * ✅ Verifica si todos los documentos requeridos tienen al menos uno aprobado.
+     *    Si es así, activa al proveedor automáticamente.
+     */
+    private function checkAndActivateProvider(Provider $provider): bool
+    {
+        $requiredDocTypeIds = $provider->providerType
+            ->documentTypes()
+            ->wherePivot('is_required', true)
+            ->pluck('document_types.id');
+
+        if ($requiredDocTypeIds->isEmpty()) {
+            \Log::warning("Proveedor {$provider->id}: sin documentos requeridos configurados para su tipo");
+            return false;
+        }
+
+        foreach ($requiredDocTypeIds as $docTypeId) {
+            $hasApproved = ProviderDocument::where('provider_id', $provider->id)
+                ->where('document_type_id', $docTypeId)
+                ->where('status', 'approved')
+                ->exists();
+
+            if (!$hasApproved) {
+                return false;
+            }
+        }
+
+        $provider->update(['status' => 'active']);
+        \Log::info("Proveedor {$provider->id} ({$provider->business_name}) activado automáticamente");
+
+        return true;
+    }
+
+    /**
      * Historial de validaciones de un documento
-     * Accesible por: Admin, Calidad, y Proveedor (solo sus documentos)
      */
     public function history(Request $request, $documentId): JsonResponse
     {
         try {
             $user = $request->user();
             $document = ProviderDocument::with(['documentType', 'provider'])->findOrFail($documentId);
-            
-            // ⭐ CONTROL DE PERMISOS POR ROL
+
             if ($user->hasRole('proveedor')) {
-                // El proveedor solo puede ver historial de sus propios documentos
                 $provider = Provider::where('email', $user->email)->first();
-                
                 if (!$provider || $document->provider_id !== $provider->id) {
                     return response()->json([
                         'message' => 'No tiene permisos para ver este historial'
                     ], 403);
                 }
             }
-            // Admin y Calidad pueden ver cualquier historial (no necesitan validación)
-            
-            // Obtener validaciones con información del usuario que validó
+
             $validations = DocumentValidation::with(['validatedBy:id,name,email'])
                 ->where('provider_document_id', $documentId)
                 ->latest('validated_at')
@@ -217,11 +239,9 @@ class DocumentValidationController extends Controller
                 'validations' => $validations,
                 'total_validations' => $validations->count(),
             ]);
-            
+
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            return response()->json([
-                'message' => 'Documento no encontrado'
-            ], 404);
+            return response()->json(['message' => 'Documento no encontrado'], 404);
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Error al obtener historial',
