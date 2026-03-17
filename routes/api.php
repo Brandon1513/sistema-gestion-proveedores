@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\DocumentValidationController;
 use App\Http\Controllers\Api\ProviderInvitationController;
 use App\Http\Controllers\Api\ProviderCertificationController;
 use App\Http\Controllers\Api\ProviderDocumentUploadController;
+use App\Http\Controllers\Api\ProfileController;
 
 /*
 |--------------------------------------------------------------------------
@@ -39,6 +40,13 @@ Route::middleware('auth:sanctum')->group(function () {
     // ===============================
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
+
+    // ===============================
+    // PERFIL DE USUARIO
+    // ===============================
+    Route::get('/me/profile',          [ProfileController::class, 'show']);
+    Route::put('/me/profile',          [ProfileController::class, 'update']);
+    Route::patch('/me/password',       [ProfileController::class, 'updatePassword']);
     
     // ===============================
     // DASHBOARD

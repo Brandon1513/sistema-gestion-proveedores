@@ -35,13 +35,13 @@ Artisan::command('inspire', function () {
 Schedule::command('documents:check-expiring --send-emails')
     ->dailyAt('08:00')
     ->timezone('America/Mexico_City')
-    ->emailOutputOnFailure('admin@sgp.local'); // Notificar al admin si falla
+    ->emailOutputOnFailure('brandon.devora@dasavena.com'); // Notificar al admin si falla
 
 // Verificar documentos críticos (7 días) cada día a las 9:00 AM
 Schedule::command('documents:check-expiring --days=7 --send-emails')
     ->dailyAt('09:00')
     ->timezone('America/Mexico_City')
-    ->emailOutputOnFailure('admin@sgp.local');
+    ->emailOutputOnFailure('brandon.devora@dasavena.com');
 
 // ALTERNATIVAS (comentadas - descomenta si prefieres usarlas):
 
