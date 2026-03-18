@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\ProviderDocumentUploadController;
 use App\Http\Controllers\Api\ProfileController;
  
 use App\Http\Controllers\Api\PasswordResetController;
+use App\Http\Controllers\Api\ProviderAccountController;
 
 /*
 |--------------------------------------------------------------------------
@@ -51,6 +52,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me/profile',          [ProfileController::class, 'show']);
     Route::put('/me/profile',          [ProfileController::class, 'update']);
     Route::patch('/me/password',       [ProfileController::class, 'updatePassword']);
+    // ===============================
+    // Administración de cuentas de proveedores (solo para super_admin y admin)
+    // ===============================
+    Route::middleware(['role:super_admin,admin'])->prefix('provider-accounts')->group(function () {
+    Route::get('/',                        [ProviderAccountController::class, 'index']);
+    Route::patch('/{id}/toggle-status',    [ProviderAccountController::class, 'toggleStatus']);
+    Route::patch('/{id}/reset-password',   [ProviderAccountController::class, 'resetPassword']);
+    Route::post('/{id}/send-reset',        [ProviderAccountController::class, 'sendReset']);
+    });
     
     // ===============================
     // DASHBOARD
