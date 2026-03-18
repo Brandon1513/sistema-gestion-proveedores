@@ -219,4 +219,28 @@ class DashboardController extends Controller
             'documents_per_month' => $documentsPerMonth,
         ]);
     }
+        /**
+     * Todos los documentos próximos a vencer (sin límite, para exportación)
+     * GET /api/documents/expiring?days=30
+     */
+    public function expiringDocuments(): JsonResponse
+    {
+        $days = request()->query('days', 30);
+ 
+        $documents = ProviderDocument::with([
+            'provider:id,business_name,rfc',
+            'provider.providerType:id,name',
+            'documentType:id,name',
+        ])
+        ->where('expiry_date', '<=', Carbon::now()->addDays((int) $days))
+        ->where('expiry_date', '>=', Carbon::now()->subDays(1)) // incluir vencidos de ayer
+        ->where('status', 'approved')
+        ->orderBy('expiry_date')
+        ->get();
+ 
+        return response()->json([
+            'documents' => $documents,
+            'total'     => $documents->count(),
+        ]);
+    }
 }

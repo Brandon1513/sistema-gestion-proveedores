@@ -16,6 +16,8 @@ use App\Http\Controllers\Api\ProviderInvitationController;
 use App\Http\Controllers\Api\ProviderCertificationController;
 use App\Http\Controllers\Api\ProviderDocumentUploadController;
 use App\Http\Controllers\Api\ProfileController;
+ 
+use App\Http\Controllers\Api\PasswordResetController;
 
 /*
 |--------------------------------------------------------------------------
@@ -26,6 +28,8 @@ use App\Http\Controllers\Api\ProfileController;
 // Rutas públicas
 Route::post('/login', [AuthController::class, 'login'])->name('login');
 Route::post('/register-provider', [AuthController::class, 'registerProvider']);
+Route::post('/forgot-password', [PasswordResetController::class, 'forgotPassword']);
+Route::post('/reset-password',  [PasswordResetController::class, 'resetPassword']);
 Route::get('/invitations/verify/{token}', [ProviderInvitationController::class, 'verify']);
 
 // Esta ruta maneja su propia autenticación mediante el token en query parameter
@@ -53,7 +57,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ===============================
     Route::get('/dashboard', [DashboardController::class, 'index']);
     Route::get('/dashboard/statistics', [DashboardController::class, 'statistics']);
-    
+    Route::get('/documents/expiring', [DashboardController::class, 'expiringDocuments']);
     // ===============================
     // TIPOS DE PROVEEDORES
     // ===============================
