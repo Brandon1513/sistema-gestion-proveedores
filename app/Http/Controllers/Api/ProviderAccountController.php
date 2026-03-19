@@ -55,7 +55,7 @@ class ProviderAccountController extends Controller
     }
 
     /**
-     * Activar / desactivar cuenta de proveedor
+     * Activar / desactivar cuenta de proveedor — cambia providers.status
      * PATCH /api/provider-accounts/{id}/toggle-status
      */
     public function toggleStatus(int $id): JsonResponse
@@ -63,11 +63,24 @@ class ProviderAccountController extends Controller
         $user = User::whereHas('roles', fn($q) => $q->where('name', 'proveedor'))
             ->findOrFail($id);
 
-        $user->update(['is_active' => !$user->is_active]);
+        $provider = Provider::where('email', $user->email)->first();
+
+        if (!$provider) {
+            return response()->json([
+                'message' => 'No se encontró el proveedor vinculado a esta cuenta',
+            ], 404);
+        }
+
+        // Toggle entre active e inactive
+        $newStatus = $provider->status === 'active' ? 'inactive' : 'active';
+        $provider->update(['status' => $newStatus]);
 
         return response()->json([
-            'message'   => $user->is_active ? 'Cuenta activada correctamente' : 'Cuenta desactivada correctamente',
-            'is_active' => $user->is_active,
+            'message'    => $newStatus === 'active'
+                ? 'Cuenta del proveedor activada correctamente'
+                : 'Cuenta del proveedor desactivada correctamente',
+            'status'     => $newStatus,
+            'is_active'  => $newStatus === 'active',
         ]);
     }
 
