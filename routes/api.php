@@ -117,6 +117,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/certifications/{certification}', [ProviderCertificationController::class, 'myUpdate']);
     Route::delete('/certifications/{certification}', [ProviderCertificationController::class, 'myDestroy']);
     });
+    
+    Route::get('/certifications', [ProviderCertificationController::class, 'globalIndex']);
 
     
     // Vehículos de proveedores

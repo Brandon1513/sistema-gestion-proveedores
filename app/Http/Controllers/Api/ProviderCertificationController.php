@@ -221,4 +221,41 @@ public function myDestroy(Request $request, $certificationId): JsonResponse
         'message' => 'Certificación eliminada exitosamente',
     ]);
 }
+
+    /**
+     * Listar TODAS las certificaciones de todos los proveedores
+     * GET /api/certifications
+     */
+    public function globalIndex(Request $request): JsonResponse
+    {
+        $query = \App\Models\ProviderCertification::with([
+            'provider:id,business_name,rfc,provider_type_id',
+            'provider.providerType:id,name',
+        ]);
+ 
+        if ($request->search) {
+            $query->where(function ($q) use ($request) {
+                $q->where('certification_type', 'like', "%{$request->search}%")
+                  ->orWhere('other_name', 'like', "%{$request->search}%")
+                  ->orWhere('certifying_body', 'like', "%{$request->search}%")
+                  ->orWhereHas('provider', fn($p) =>
+                      $p->where('business_name', 'like', "%{$request->search}%")
+                        ->orWhere('rfc', 'like', "%{$request->search}%")
+                  );
+            });
+        }
+ 
+        if ($request->provider_type_id) {
+            $query->whereHas('provider', fn($p) =>
+                $p->where('provider_type_id', $request->provider_type_id)
+            );
+        }
+ 
+        $certifications = $query->orderBy('expiry_date')->get();
+ 
+        return response()->json([
+            'certifications' => $certifications,
+            'total'          => $certifications->count(),
+        ]);
+    }
 }
