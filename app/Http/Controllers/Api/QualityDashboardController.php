@@ -13,52 +13,41 @@ use Illuminate\Support\Facades\Log;
 
 class QualityDashboardController extends Controller
 {
-    /**
-     * Obtener estadísticas del dashboard de Calidad
-     */
     public function stats(Request $request): JsonResponse
     {
         try {
             $period = $request->get('period', 'month');
-            
-            // Calcular fechas según período
+
             $startDate = match($period) {
-                'day' => Carbon::today(),
-                'week' => Carbon::now()->startOfWeek(),
+                'day'   => Carbon::today(),
+                'week'  => Carbon::now()->startOfWeek(),
                 'month' => Carbon::now()->startOfMonth(),
                 default => Carbon::now()->startOfMonth(),
             };
-            
             $endDate = Carbon::now();
 
-            // 1. Total documentos validados en el período
-            $totalValidated = DocumentValidation::whereBetween('validated_at', [$startDate, $endDate])
-                ->count();
+            $totalValidated = DocumentValidation::whereBetween('validated_at', [$startDate, $endDate])->count();
 
-            // 2. Documentos aprobados vs rechazados
             $approved = DocumentValidation::whereBetween('validated_at', [$startDate, $endDate])
-                ->where('action', 'approved')
-                ->count();
+                ->where('action', 'approved')->count();
 
             $rejected = DocumentValidation::whereBetween('validated_at', [$startDate, $endDate])
-                ->where('action', 'rejected')
-                ->count();
+                ->where('action', 'rejected')->count();
 
-            // 3. Promedio de tiempo de validación (en horas)
+            // ✅ Fix PostgreSQL: EXTRACT EPOCH en lugar de TIMESTAMPDIFF
             $avgValidationTime = 0;
             try {
                 $avgTime = ProviderDocument::whereNotNull('status')
                     ->where('status', '!=', 'pending')
                     ->whereBetween('created_at', [$startDate, $endDate])
-                    ->selectRaw('AVG(TIMESTAMPDIFF(HOUR, created_at, updated_at)) as avg_hours')
+                    ->selectRaw("AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) / 3600) as avg_hours")
                     ->value('avg_hours');
-                
-                $avgValidationTime = $avgTime ? round($avgTime, 2) : 0;
+
+                $avgValidationTime = $avgTime ? round($avgTime, 1) : 0;
             } catch (\Exception $e) {
-                Log::warning('Error calculando tiempo promedio de validación: ' . $e->getMessage());
+                Log::warning('Error calculando tiempo promedio: ' . $e->getMessage());
             }
 
-            // 4. Top 5 proveedores con más rechazos
             $topRejected = [];
             try {
                 $topRejected = DocumentValidation::whereBetween('validated_at', [$startDate, $endDate])
@@ -72,13 +61,11 @@ class QualityDashboardController extends Controller
                     ->get()
                     ->toArray();
             } catch (\Exception $e) {
-                Log::warning('Error obteniendo top proveedores rechazados: ' . $e->getMessage());
+                Log::warning('Error obteniendo top rechazados: ' . $e->getMessage());
             }
 
-            // 5. Documentos pendientes
             $pendingDocuments = ProviderDocument::where('status', 'pending')->count();
 
-            // 6. Distribución por tipo de documento
             $documentTypeDistribution = [];
             try {
                 $documentTypeDistribution = DocumentValidation::whereBetween('validated_at', [$startDate, $endDate])
@@ -91,15 +78,13 @@ class QualityDashboardController extends Controller
                     ->get()
                     ->toArray();
             } catch (\Exception $e) {
-                Log::warning('Error obteniendo distribución por tipo de documento: ' . $e->getMessage());
+                Log::warning('Error obteniendo distribución por tipo: ' . $e->getMessage());
             }
 
-            // 7. Tasa de aprobación
-            $approvalRate = $totalValidated > 0 
-                ? round(($approved / $totalValidated) * 100, 2) 
+            $approvalRate = $totalValidated > 0
+                ? round(($approved / $totalValidated) * 100, 1)
                 : 0;
 
-            // 8. Top 5 validadores
             $topValidators = [];
             try {
                 $topValidators = DocumentValidation::whereBetween('validated_at', [$startDate, $endDate])
@@ -115,68 +100,38 @@ class QualityDashboardController extends Controller
             }
 
             return response()->json([
-                'period' => $period,
-                'date_range' => [
-                    'start' => $startDate->toDateString(),
-                    'end' => $endDate->toDateString(),
+                'period'     => $period,
+                'date_range' => ['start' => $startDate->toDateString(), 'end' => $endDate->toDateString()],
+                'summary'    => [
+                    'total_validated'          => $totalValidated,
+                    'approved'                 => $approved,
+                    'rejected'                 => $rejected,
+                    'pending'                  => $pendingDocuments,
+                    'approval_rate'            => $approvalRate,
+                    'avg_validation_time_hours'=> $avgValidationTime,
                 ],
-                'summary' => [
-                    'total_validated' => $totalValidated,
-                    'approved' => $approved,
-                    'rejected' => $rejected,
-                    'pending' => $pendingDocuments,
-                    'approval_rate' => $approvalRate,
-                    'avg_validation_time_hours' => $avgValidationTime,
-                ],
-                'charts' => [
-                    'approval_distribution' => [
-                        'approved' => $approved,
-                        'rejected' => $rejected,
-                    ],
+                'charts'  => [
+                    'approval_distribution'      => ['approved' => $approved, 'rejected' => $rejected],
                     'document_type_distribution' => $documentTypeDistribution,
                 ],
                 'rankings' => [
                     'top_rejected_providers' => $topRejected,
-                    'top_validators' => $topValidators,
+                    'top_validators'         => $topValidators,
                 ],
             ]);
+
         } catch (\Exception $e) {
             Log::error('Error en QualityDashboardController@stats: ' . $e->getMessage());
-            Log::error($e->getTraceAsString());
-            
-            // Devolver estructura vacía en caso de error
             return response()->json([
-                'period' => $request->get('period', 'month'),
-                'date_range' => [
-                    'start' => Carbon::now()->startOfMonth()->toDateString(),
-                    'end' => Carbon::now()->toDateString(),
-                ],
-                'summary' => [
-                    'total_validated' => 0,
-                    'approved' => 0,
-                    'rejected' => 0,
-                    'pending' => 0,
-                    'approval_rate' => 0,
-                    'avg_validation_time_hours' => 0,
-                ],
-                'charts' => [
-                    'approval_distribution' => [
-                        'approved' => 0,
-                        'rejected' => 0,
-                    ],
-                    'document_type_distribution' => [],
-                ],
-                'rankings' => [
-                    'top_rejected_providers' => [],
-                    'top_validators' => [],
-                ],
+                'period'     => $request->get('period', 'month'),
+                'date_range' => ['start' => Carbon::now()->startOfMonth()->toDateString(), 'end' => Carbon::now()->toDateString()],
+                'summary'    => ['total_validated'=>0,'approved'=>0,'rejected'=>0,'pending'=>0,'approval_rate'=>0,'avg_validation_time_hours'=>0],
+                'charts'     => ['approval_distribution'=>['approved'=>0,'rejected'=>0],'document_type_distribution'=>[]],
+                'rankings'   => ['top_rejected_providers'=>[],'top_validators'=>[]],
             ]);
         }
     }
 
-    /**
-     * Obtener actividad reciente
-     */
     public function recentActivity(Request $request): JsonResponse
     {
         try {
@@ -190,28 +145,22 @@ class QualityDashboardController extends Controller
                 ->latest('validated_at')
                 ->limit($limit)
                 ->get()
-                ->map(function ($validation) {
-                    return [
-                        'id' => $validation->id,
-                        'action' => $validation->action,
-                        'provider' => optional($validation->providerDocument)->provider->business_name ?? 'N/A',
-                        'document_type' => optional($validation->providerDocument)->documentType->name ?? 'N/A',
-                        'validator' => optional($validation->validatedBy)->name ?? 'N/A',
-                        'comments' => $validation->comments,
-                        'validated_at' => $validation->validated_at->diffForHumans(),
-                        'validated_at_full' => $validation->validated_at->toDateTimeString(),
-                    ];
-                });
+                ->map(fn($v) => [
+                    'id'               => $v->id,
+                    'action'           => $v->action,
+                    'provider'         => optional($v->providerDocument)->provider->business_name ?? 'N/A',
+                    'document_type'    => optional($v->providerDocument)->documentType->name ?? 'N/A',
+                    'validator'        => optional($v->validatedBy)->name ?? 'N/A',
+                    'comments'         => $v->comments,
+                    'validated_at'     => $v->validated_at->diffForHumans(),
+                    'validated_at_full'=> $v->validated_at->toDateTimeString(),
+                ]);
 
-            return response()->json([
-                'activities' => $activities,
-            ]);
+            return response()->json(['activities' => $activities]);
+
         } catch (\Exception $e) {
             Log::error('Error en QualityDashboardController@recentActivity: ' . $e->getMessage());
-            
-            return response()->json([
-                'activities' => [],
-            ]);
+            return response()->json(['activities' => []]);
         }
     }
 }

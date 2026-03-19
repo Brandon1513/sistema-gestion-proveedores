@@ -1,24 +1,24 @@
 <?php
 
+use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\DocumentStatusController;
+use App\Http\Controllers\Api\DocumentValidationController;
+use App\Http\Controllers\Api\PasswordResetController;
+use App\Http\Controllers\Api\ProfileController;
+use App\Http\Controllers\Api\ProviderAccountController;
+use App\Http\Controllers\Api\ProviderCertificationController;
+use App\Http\Controllers\Api\ProviderController;
+use App\Http\Controllers\Api\ProviderDashboardController;
+use App\Http\Controllers\Api\ProviderDocumentController;
+use App\Http\Controllers\Api\ProviderDocumentUploadController;
+use App\Http\Controllers\Api\ProviderInvitationController;
+use App\Http\Controllers\Api\ProviderProfileController;
+use App\Http\Controllers\Api\ProviderTypeController;
+use App\Http\Controllers\Api\ProviderVehicleController;
+use App\Http\Controllers\Api\QualityDashboardController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\ProviderController;
-use App\Http\Controllers\Api\DashboardController;
-use App\Http\Controllers\Api\ProviderTypeController;
-use App\Http\Controllers\Api\ProviderProfileController;
-use App\Http\Controllers\Api\ProviderVehicleController;
-use App\Http\Controllers\Api\ProviderDocumentController;
-use App\Http\Controllers\Api\QualityDashboardController;
-use App\Http\Controllers\Api\ProviderDashboardController;
-use App\Http\Controllers\Api\DocumentValidationController;
-use App\Http\Controllers\Api\ProviderInvitationController;
-use App\Http\Controllers\Api\ProviderCertificationController;
-use App\Http\Controllers\Api\ProviderDocumentUploadController;
-use App\Http\Controllers\Api\ProfileController;
- 
-use App\Http\Controllers\Api\PasswordResetController;
-use App\Http\Controllers\Api\ProviderAccountController;
 
 /*
 |--------------------------------------------------------------------------
@@ -188,4 +188,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/invitations', [ProviderInvitationController::class, 'store']);
     Route::post('/invitations/{invitation}/resend', [ProviderInvitationController::class, 'resend']);
     Route::delete('/invitations/{invitation}', [ProviderInvitationController::class, 'cancel']);
+
+    // ===============================
+    // ESTADÍSTICAS DE CALIDAD
+    // ===============================
+
+    Route::middleware(['role:super_admin,admin,compras,calidad'])->group(function () {
+    Route::get('/documents/status', [DocumentStatusController::class, 'index']);
+    });
+
 });
