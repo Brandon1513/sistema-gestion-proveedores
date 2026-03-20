@@ -1,9 +1,9 @@
 <?php
-
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use App\Http\Middleware\CheckRole;
+use Illuminate\Http\Middleware\HandleCors;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -13,18 +13,21 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
+        // ✅ CORS primero que todo
+        $middleware->use([
+            HandleCors::class,
+        ]);
+
         $middleware->statefulApi();
         
         $middleware->api(prepend: [
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
         ]);
         
-        // Excluir rutas API de la verificación CSRF
         $middleware->validateCsrfTokens(except: [
             'api/*',
         ]);
 
-        // ✅ NUEVO: Registrar middleware de verificación de roles
         $middleware->alias([
             'role' => CheckRole::class,
         ]);
