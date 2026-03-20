@@ -112,13 +112,24 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/personnel/{id}', [ProviderProfileController::class, 'deletePersonnel']);
 
         //  CERTIFICACIONES DEL PROVEEDOR
-    Route::get('/certifications', [ProviderCertificationController::class, 'myIndex']);
-    Route::post('/certifications', [ProviderCertificationController::class, 'myStore']);
-    Route::put('/certifications/{certification}', [ProviderCertificationController::class, 'myUpdate']);
-    Route::delete('/certifications/{certification}', [ProviderCertificationController::class, 'myDestroy']);
+        Route::get('/certifications',                [ProviderCertificationController::class, 'myIndex']);
+        Route::post('/certifications',               [ProviderCertificationController::class, 'myStore']);
+        Route::put('/certifications/{certification}',[ProviderCertificationController::class, 'myUpdate']);
+        Route::delete('/certifications/{certification}', [ProviderCertificationController::class, 'myDestroy']);
+        Route::get('/certifications/{certification}/download', [ProviderCertificationController::class, 'myDownload']);
     });
-    
+
+    // Vista global (calidad/admin/compras)
     Route::get('/certifications', [ProviderCertificationController::class, 'globalIndex']);
+    Route::get('/certifications/pending-count', [ProviderCertificationController::class, 'pendingCount']);
+    
+    // Validar certificación (solo calidad/admin)
+    Route::middleware(['role:super_admin,admin,calidad'])->group(function () {
+        Route::post('/providers/{provider}/certifications/{certification}/validate',
+            [ProviderCertificationController::class, 'validate']);
+        Route::get('/providers/{provider}/certifications/{certification}/download',
+            [ProviderCertificationController::class, 'download']);
+    });
 
     
     // Vehículos de proveedores
