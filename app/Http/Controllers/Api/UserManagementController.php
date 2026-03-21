@@ -39,8 +39,8 @@ class UserManagementController extends Controller
         }
 
         // Filtro por estado
-        if ($request->has('is_active') && $request->is_active !== null) {
-            $query->where('is_active', $request->is_active);
+        if ($request->filled('is_active')) {
+        $query->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
         }
 
         $users = $query->latest()->paginate(15);
