@@ -60,7 +60,7 @@
 
     <div style="text-align: center; margin: 30px 0;">
         <a href="{{ $systemUrl }}" class="button">
-            📋 Revisar Certificación
+             Revisar Certificación
         </a>
     </div>
 

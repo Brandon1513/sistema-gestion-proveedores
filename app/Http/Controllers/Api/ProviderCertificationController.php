@@ -108,6 +108,9 @@ class ProviderCertificationController extends Controller
             'validated_at'        => now(),
         ]);
 
+        // ✅ Notificar al proveedor sobre el resultado de la validación
+        $this->notifyProvider($provider, $certification->fresh(['validator']), $request->status, $request->comments);
+
         return response()->json([
             'message'       => $request->status === 'approved' ? 'Certificación aprobada' : 'Certificación rechazada',
             'certification' => $certification->fresh(['validator']),
@@ -389,7 +392,7 @@ class ProviderCertificationController extends Controller
             )->get();
 
             $certName   = $cert->certification_type === 'Otro' ? $cert->other_name : $cert->certification_type;
-            $systemUrl  = config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:5173'))
+            $systemUrl  = config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:5175'))
                           . '/documents?tab=certifications';
 
             foreach ($qualityUsers as $user) {
@@ -411,6 +414,43 @@ class ProviderCertificationController extends Controller
             }
         } catch (\Exception $e) {
             Log::error('Error enviando notificación de certificación: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Notifica al proveedor cuando Calidad aprueba o rechaza su certificación.
+     */
+    private function notifyProvider(Provider $provider, ProviderCertification $cert, string $status, ?string $comments): void
+    {
+        try {
+            // Buscar el usuario del proveedor por email
+            $providerUser = User::where('email', $provider->email)->first();
+            if (!$providerUser) {
+                Log::warning("No se encontró usuario para proveedor {$provider->id} ({$provider->email}) al notificar validación.");
+                return;
+            }
+
+            $certName  = $cert->certification_type === 'Otro' ? $cert->other_name : $cert->certification_type;
+            $portalUrl = config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:5175'))
+                         . '/provider/certifications';
+
+            Mail::send('emails.certification-validated', [
+                'providerName'      => $provider->business_name,
+                'certificationName' => $certName,
+                'certifyingBody'    => $cert->certifying_body,
+                'expiryDate'        => $cert->expiry_date?->format('d/m/Y'),
+                'status'            => $status,
+                'comments'          => $comments,
+                'portalUrl'         => $portalUrl,
+            ], function ($message) use ($providerUser, $certName, $status) {
+                $subject = $status === 'approved'
+                    ? "✅ Certificación aprobada: {$certName} — SGP DASAVENA"
+                    : "❌ Certificación rechazada: {$certName} — SGP DASAVENA";
+
+                $message->to($providerUser->email, $providerUser->name)->subject($subject);
+            });
+        } catch (\Exception $e) {
+            Log::error('Error notificando al proveedor sobre certificación: ' . $e->getMessage());
         }
     }
 }
