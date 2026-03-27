@@ -19,19 +19,20 @@ class DocumentType extends Model
         'requires_expiry',
         'expiry_alert_days',
         'is_required',
+        'allows_multiple',   // ← nuevo: permite múltiples cargas del mismo tipo
         'allowed_extensions',
         'max_file_size_mb',
     ];
 
     protected $casts = [
-        'requires_expiry' => 'boolean',
-        'is_required' => 'boolean',
+        'requires_expiry'    => 'boolean',
+        'is_required'        => 'boolean',
+        'allows_multiple'    => 'boolean',  // ← nuevo
         'allowed_extensions' => 'array',
-        'max_file_size_mb' => 'integer',
-        'expiry_alert_days' => 'integer',
+        'max_file_size_mb'   => 'integer',
+        'expiry_alert_days'  => 'integer',
     ];
 
-    // Relaciones
     public function providerTypes(): BelongsToMany
     {
         return $this->belongsToMany(ProviderType::class, 'document_type_provider_type')
@@ -44,7 +45,6 @@ class DocumentType extends Model
         return $this->hasMany(ProviderDocument::class);
     }
 
-    // Métodos de utilidad
     public function isValidExtension(string $extension): bool
     {
         if (!$this->allowed_extensions) {
