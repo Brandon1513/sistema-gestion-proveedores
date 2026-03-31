@@ -20,6 +20,8 @@ use App\Http\Controllers\Api\QualityDashboardController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
+use App\Http\Controllers\Api\AppointmentController;
+
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -209,5 +211,44 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware(['role:super_admin,admin,compras,calidad'])->group(function () {
     Route::get('/documents/status', [DocumentStatusController::class, 'index']);
     });
+
+    // ===============================
+    // CITAS (CALENDARIO)
+    // ===============================
+ 
+    // Vista Compras / Admin — crear, editar, cancelar, ver
+    Route::middleware(['role:super_admin,admin,compras'])->prefix('appointments')->group(function () {
+        Route::get('/',                        [AppointmentController::class, 'index']);
+        Route::post('/',                       [AppointmentController::class, 'store']);
+        Route::get('/{appointment}',           [AppointmentController::class, 'show']);
+        Route::put('/{appointment}',           [AppointmentController::class, 'update']);
+        Route::post('/{appointment}/cancel',   [AppointmentController::class, 'cancel']);
+    });
+ 
+    // Descarga de adjunto — accesible para Compras/Admin Y proveedor dueño
+    // (el controller valida internamente quién puede acceder)
+    Route::get('/appointments/{appointment}/attachment', [AppointmentController::class, 'downloadAttachment']);
+    // ── Seguridad ────────────────────────────────────────────────────
+    Route::middleware(['role:super_admin,admin,seguridad'])->prefix('security')->group(function () {
+        Route::get('/appointments',                         [AppointmentController::class, 'securityIndex']);
+        Route::post('/appointments/{id}/confirm-entry',     [AppointmentController::class, 'confirmEntry']);
+    });
+    
+    // ── Ingeniero de Alimentos ───────────────────────────────────────
+    Route::middleware(['role:super_admin,admin,ingeniero_alimentos'])->prefix('food-engineer')->group(function () {
+        Route::get('/appointments',                         [AppointmentController::class, 'foodEngineerIndex']);
+        Route::post('/appointments/{id}/reception',         [AppointmentController::class, 'registerReception']);
+    });
+ 
+    // Vista proveedor — solo sus propias citas
+    Route::prefix('provider')->middleware('role:proveedor')->group(function () {
+        // ... (agregar dentro del grupo provider que ya existe)
+        Route::get('/appointments', [AppointmentController::class, 'myIndex']);
+        Route::post('/appointments/{appointmentId}/complete', [AppointmentController::class, 'providerComplete']);
+    });
+    Route::get('/appointments/{id}/physical-docs-config', [AppointmentController::class, 'getPhysicalDocsConfig']);
+    
+    // Unidades de medida — accesible para ingeniero y compras
+    Route::get('/units', [App\Http\Controllers\Api\UnitController::class, 'index']);
 
 });
