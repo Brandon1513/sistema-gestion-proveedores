@@ -17,6 +17,10 @@ use App\Http\Controllers\Api\ProviderProfileController;
 use App\Http\Controllers\Api\ProviderTypeController;
 use App\Http\Controllers\Api\ProviderVehicleController;
 use App\Http\Controllers\Api\QualityDashboardController;
+use App\Http\Controllers\Api\CatalogImportController;
+
+use App\Http\Controllers\Api\ProductsServicesCatalogController;
+
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -232,12 +236,20 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware(['role:super_admin,admin,seguridad'])->prefix('security')->group(function () {
         Route::get('/appointments',                         [AppointmentController::class, 'securityIndex']);
         Route::post('/appointments/{id}/confirm-entry',     [AppointmentController::class, 'confirmEntry']);
+        Route::post('/appointments/{id}/no-show', [AppointmentController::class, 'markNoShow']);
     });
+
+    // ── Fuera de grupos — accesible para Compras y Admin ────────────
+    Route::middleware(['role:super_admin,admin,compras'])->group(function () {
+        Route::get('/providers/{id}/appointment-products',
+            [AppointmentController::class, 'getProviderProducts']);
+    });
+ 
     
     // ── Ingeniero de Alimentos ───────────────────────────────────────
-    Route::middleware(['role:super_admin,admin,ingeniero_alimentos'])->prefix('food-engineer')->group(function () {
-        Route::get('/appointments',                         [AppointmentController::class, 'foodEngineerIndex']);
-        Route::post('/appointments/{id}/reception',         [AppointmentController::class, 'registerReception']);
+    Route::middleware(['role:super_admin,admin,ingeniero_alimentos,seguridad'])->prefix('food-engineer')->group(function () {
+    Route::get('/appointments', [AppointmentController::class, 'foodEngineerIndex']);
+    Route::post('/appointments/{id}/reception', [AppointmentController::class, 'registerReception']);
     });
  
     // Vista proveedor — solo sus propias citas
@@ -250,5 +262,39 @@ Route::middleware('auth:sanctum')->group(function () {
     
     // Unidades de medida — accesible para ingeniero y compras
     Route::get('/units', [App\Http\Controllers\Api\UnitController::class, 'index']);
+
+    // Catálogo global (lectura para todos los roles internos)
+Route::get('/catalog', [ProductsServicesCatalogController::class, 'index']);
+ 
+// Gestión del catálogo — solo Compras/Admin
+// Gestión del catálogo — solo Compras/Admin
+Route::middleware(['role:super_admin,admin,compras'])->prefix('catalog')->group(function () {
+    // Categorías
+    Route::get('/categories',         [ProductsServicesCatalogController::class, 'getCategories']);
+    Route::post('/categories',        [ProductsServicesCatalogController::class, 'storeCategory']);
+    Route::put('/categories/{id}',    [ProductsServicesCatalogController::class, 'updateCategory']);
+    // Ítems
+    Route::get('/items',              [ProductsServicesCatalogController::class, 'getItems']);
+    Route::post('/items',             [ProductsServicesCatalogController::class, 'storeItem']);
+    Route::put('/items/{id}',         [ProductsServicesCatalogController::class, 'updateItem']);
+    Route::delete('/items/{id}',      [ProductsServicesCatalogController::class, 'destroyItem']);
+    // ✅ Solo /import, sin repetir /catalog
+    Route::post('/import',            [CatalogImportController::class, 'import']);
+});
+
+Route::middleware(['role:super_admin,admin,compras'])->group(function () {
+    Route::put('/providers/{id}/products-services-sync',
+        [ProductsServicesCatalogController::class, 'syncProviderItems']);
+});
+ 
+// Ver selección de un proveedor — Compras/Admin
+Route::get('/providers/{id}/products-services', [ProductsServicesCatalogController::class, 'providerItems']);
+ 
+// Portal proveedor — ver y actualizar su selección
+Route::prefix('provider')->middleware('role:proveedor')->group(function () {
+    // ... (dentro del grupo provider que ya existe)
+    Route::get('/products-services',  [ProductsServicesCatalogController::class, 'providerGetCatalog']);
+    Route::put('/products-services',  [ProductsServicesCatalogController::class, 'providerUpdateSelection']);
+});
 
 });

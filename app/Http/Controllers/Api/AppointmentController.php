@@ -13,6 +13,8 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Carbon\Carbon;
 use App\Models\Unit;
+use App\Models\AppointmentItem;
+use App\Models\ProductService;
 
 class AppointmentController extends Controller
 {
@@ -65,42 +67,62 @@ class AppointmentController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        $validated = $request->validate([
+        if ($request->has('items') && is_string($request->items)) {
+        $request->merge(['items' => json_decode($request->items, true)]);
+    }
+        $request->validate([
             'provider_id'      => 'required|exists:providers,id',
-            'appointment_date' => ['required','date','after_or_equal:today'],
-            'appointment_time' => ['required','date_format:H:i', function($attr,$value,$fail) use ($request) {
-                $this->validateBusinessHours($request->appointment_date, $value, $fail);
-            }],
-            'type'       => 'required|in:entrega,residuos,auditoria,calibracion,servicio',
-            'products'   => 'nullable|string|max:1000',
-            'notes'      => 'nullable|string|max:1000',
-            'attachment' => 'nullable|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:10240',
+            'appointment_date' => 'required|date',
+            'appointment_time' => 'required',
+            'type'             => 'required|in:entrega,residuos,auditoria,calibracion,servicio',
+            'notes'            => 'nullable|string|max:2000',
+            'status'           => 'nullable|in:scheduled,confirmed',
+            // Items (múltiples productos)
+            'items'            => 'nullable|array',
+            'items.*.product_service_id' => 'required|exists:products_services,id',
+            'items.*.quantity_expected'  => 'nullable|numeric|min:0',
+            'items.*.unit_id'            => 'nullable|exists:units,id',
+            'items.*.notes'              => 'nullable|string|max:500',
         ]);
-
-        $attachmentPath = null; $attachmentName = null;
-        if ($request->hasFile('attachment')) {
-            $file = $request->file('attachment');
-            $attachmentPath = $file->store('appointments','documents');
-            $attachmentName = $file->getClientOriginalName();
-        }
-
-        $appointment = Appointment::create([
-            'provider_id'      => $validated['provider_id'],
+ 
+        $appointment = \App\Models\Appointment::create([
+            'provider_id'      => $request->provider_id,
             'scheduled_by'     => auth()->id(),
-            'appointment_date' => $validated['appointment_date'],
-            'appointment_time' => $validated['appointment_time'],
-            'type'             => $validated['type'],
-            'products'         => $validated['products'] ?? null,
-            'notes'            => $validated['notes']    ?? null,
-            'attachment_path'  => $attachmentPath,
-            'attachment_name'  => $attachmentName,
-            'status'           => 'scheduled',
-            'reception_status' => 'pending',
+            'appointment_date' => $request->appointment_date,
+            'appointment_time' => $request->appointment_time,
+            'type'             => $request->type,
+            'notes'            => $request->notes,
+            'products'         => $request->products, // legacy, para compatibilidad
+            'status'           => $request->status ?? 'scheduled',
         ]);
-
-        $appointment->load(['provider:id,business_name,rfc,email','scheduledBy:id,name']);
-        $this->notifyProvider($appointment, 'scheduled');
-        return response()->json(['message'=>'Cita agendada correctamente','appointment'=>$this->formatAppointment($appointment)], 201);
+ 
+        // Guardar adjunto si viene
+        if ($request->hasFile('attachment')) {
+            $path = $request->file('attachment')->store("appointments/{$appointment->id}", 'documents');
+            $appointment->update([
+                'attachment_path' => $path,
+                'attachment_name' => $request->file('attachment')->getClientOriginalName(),
+            ]);
+        }
+ 
+        // Guardar ítems
+        if ($request->filled('items')) {
+            foreach ($request->items as $item) {
+                AppointmentItem::create([
+                    'appointment_id'     => $appointment->id,
+                    'product_service_id' => $item['product_service_id'],
+                    'quantity_expected'  => $item['quantity_expected'] ?? null,
+                    'unit_id'            => $item['unit_id'] ?? null,
+                    'notes'              => $item['notes'] ?? null,
+                    'reception_status'   => 'pending',
+                ]);
+            }
+        }
+ 
+        return response()->json([
+            'message'     => 'Cita agendada correctamente',
+            'appointment' => $this->formatAppointment($appointment->fresh(['provider', 'items.productService', 'items.unit'])),
+        ], 201);
     }
 
     public function show(Appointment $appointment): JsonResponse
@@ -120,6 +142,9 @@ class AppointmentController extends Controller
 
     public function update(Request $request, Appointment $appointment): JsonResponse
     {
+        if ($request->has('items') && is_string($request->items)) {
+            $request->merge(['items' => json_decode($request->items, true)]);
+        }
         if (in_array($appointment->status, ['cancelled','completed']))
             return response()->json(['message'=>'No se puede modificar una cita cancelada o completada'], 422);
 
@@ -231,32 +256,42 @@ class AppointmentController extends Controller
 
     // ── Seguridad ─────────────────────────────────────────────────────────────
 
-    public function securityIndex(Request $request): JsonResponse
+   public function securityIndex(Request $request): JsonResponse
     {
         $query = Appointment::with([
             'provider:id,business_name,rfc,provider_type_id',
             'provider.providerType:id,name',
-            'vehicle:id,brand_model,plates,color',
-            'personnel:id,full_name,position',
+            'vehicle:id,brand_model,plates',
+            'personnel:id,full_name',
             'entryConfirmedBy:id,name',
-        ]);
-
+            'noShowRegisteredBy:id,name',
+        ])->whereNotIn('status', ['cancelled']);
+ 
+        // ── Filtro por vista ──────────────────────────────────────
         if ($request->filled('date')) {
-            $query->forDate($request->date);
-        } elseif ($request->view === 'week' && $request->filled('week_start')) {
-            $weekEnd = Carbon::parse($request->week_start)->addDays(6)->format('Y-m-d');
-            $query->whereBetween('appointment_date', [$request->week_start, $weekEnd]);
+            // Vista día
+            $query->whereDate('appointment_date', $request->date);
+ 
+        } elseif ($request->filled('week_start')) {
+            // Vista semana
+            $start = \Carbon\Carbon::parse($request->week_start);
+            $end   = $start->copy()->addDays(6);
+            $query->whereBetween('appointment_date', [$start->toDateString(), $end->toDateString()]);
+ 
+        } elseif ($request->filled('year') && $request->filled('month')) {
+            // ✅ Vista mes — NUEVO
+            $query->whereYear('appointment_date', $request->year)
+                  ->whereMonth('appointment_date', $request->month);
+ 
         } else {
-            $query->forToday();
+            // Default: hoy
+            $query->whereDate('appointment_date', today());
         }
-
-        $query->whereNotIn('status',['cancelled']);
-        $appointments = $query->orderBy('appointment_time')->get();
-
+ 
+        $appointments = $query->orderBy('appointment_date')->orderBy('appointment_time')->get();
+ 
         return response()->json([
             'appointments' => $appointments->map(fn($a) => $this->formatAppointment($a)),
-            'total'        => $appointments->count(),
-            'date'         => $request->date ?? today()->format('Y-m-d'),
         ]);
     }
 
@@ -341,50 +376,92 @@ class AppointmentController extends Controller
 
     // ── Ingeniero de Alimentos ────────────────────────────────────────────────
 
-    public function foodEngineerIndex(Request $request): JsonResponse
+           public function foodEngineerIndex(Request $request): JsonResponse
     {
-        // Entregas de hoy
-        $today = Appointment::with([
+        $with = [
             'provider:id,business_name,rfc,provider_type_id',
             'provider.providerType:id,name',
-            'vehicle:id,brand_model,plates',
-            'personnel:id,full_name',
-            'entryConfirmedBy:id,name',
             'receptionReviewedBy:id,name',
-            'unit:id,name,abbreviation',
-        ])->forToday()->deliveries()->orderBy('appointment_time')->get();
+            'items.productService:id,name,type',
+            'items.unit:id,name,abbreviation',
+            'items.receivedUnit:id,name,abbreviation',
+        ];
  
-        // Historial con filtros
-        $historyQuery = Appointment::with([
-            'provider:id,business_name,rfc',
-            'receptionReviewedBy:id,name',
-            'unit:id,name,abbreviation',
-        ])->deliveries()->whereNotNull('reception_reviewed_at');
+        // ── Vista mes ─────────────────────────────────────────────
+        if ($request->filled('year') && $request->filled('month')) {
+            $deliveries = Appointment::with($with)
+                ->deliveries()
+                ->whereYear('appointment_date', $request->year)
+                ->whereMonth('appointment_date', $request->month)
+                ->whereNotIn('status', ['cancelled'])
+                ->orderBy('appointment_date')
+                ->orderBy('appointment_time')
+                ->get();
  
-        // Filtro por proveedor
-        if ($request->filled('provider_id')) {
-            $historyQuery->where('provider_id', $request->provider_id);
+            return response()->json([
+                'month_deliveries' => $deliveries->map(fn($a) => $this->formatAppointment($a)),
+            ]);
         }
  
-        // Filtro por fecha inicio
-        if ($request->filled('date_from')) {
-            $historyQuery->whereDate('appointment_date', '>=', $request->date_from);
-        } else {
-            // Default: últimos 90 días
-            $historyQuery->whereDate('appointment_date', '>=', today()->subDays(90));
+        // ── Vista semana ──────────────────────────────────────────
+        if ($request->filled('week_start')) {
+            $start = \Carbon\Carbon::parse($request->week_start);
+            $end   = $start->copy()->addDays(6);
+ 
+            $deliveries = Appointment::with($with)
+                ->deliveries()
+                ->whereBetween('appointment_date', [$start->toDateString(), $end->toDateString()])
+                ->whereNotIn('status', ['cancelled'])
+                ->orderBy('appointment_date')
+                ->orderBy('appointment_time')
+                ->get();
+ 
+            return response()->json([
+                'today' => $deliveries->map(fn($a) => $this->formatAppointment($a)),
+            ]);
         }
  
-        // Filtro por fecha fin
-        if ($request->filled('date_to')) {
-            $historyQuery->whereDate('appointment_date', '<=', $request->date_to);
+        // ── Vista día ─────────────────────────────────────────────
+        if ($request->filled('date')) {
+            $deliveries = Appointment::with($with)
+                ->deliveries()
+                ->whereDate('appointment_date', $request->date)
+                ->whereNotIn('status', ['cancelled'])
+                ->orderBy('appointment_time')
+                ->get();
+ 
+            return response()->json([
+                'today' => $deliveries->map(fn($a) => $this->formatAppointment($a)),
+                'stats' => [
+                    'today_total'    => $deliveries->count(),
+                    'today_pending'  => $deliveries->where('reception_status', 'pending')->count(),
+                    'today_accepted' => $deliveries->whereIn('reception_status', ['accepted'])->count(),
+                    'today_rejected' => $deliveries->whereIn('reception_status', ['rejected', 'partial'])->count(),
+                ],
+            ]);
         }
  
-        $history = $historyQuery->orderByDesc('appointment_date')
-            ->orderByDesc('appointment_time')
-            ->limit(100)
+        // ── Default: hoy + historial ──────────────────────────────
+        $today = Appointment::with($with)
+            ->forToday()->deliveries()
+            ->orderBy('appointment_time')
             ->get();
  
-        // Lista de proveedores para el filtro (solo los que tienen entregas)
+        // Historial con filtros
+        $historyQuery = Appointment::with($with)
+            ->deliveries()
+            ->whereNotNull('reception_reviewed_at');
+ 
+        if ($request->filled('provider_id')) $historyQuery->where('provider_id', $request->provider_id);
+        if ($request->filled('date_from'))   $historyQuery->whereDate('appointment_date', '>=', $request->date_from);
+        else                                  $historyQuery->whereDate('appointment_date', '>=', today()->subDays(90));
+        if ($request->filled('date_to'))     $historyQuery->whereDate('appointment_date', '<=', $request->date_to);
+ 
+        $history = $historyQuery
+            ->orderByDesc('appointment_date')
+            ->orderByDesc('appointment_time')
+            ->limit(100)->get();
+ 
         $providerIds = Appointment::deliveries()
             ->whereNotNull('reception_reviewed_at')
             ->distinct()->pluck('provider_id');
@@ -397,114 +474,91 @@ class AppointmentController extends Controller
             'providers' => $providers,
             'stats'     => [
                 'today_total'    => $today->count(),
-                'today_pending'  => $today->where('reception_status','pending')->count(),
-                'today_accepted' => $today->where('reception_status','accepted')->count(),
-                'today_rejected' => $today->where('reception_status','rejected')->count(),
+                'today_pending'  => $today->where('reception_status', 'pending')->count(),
+                'today_accepted' => $today->whereIn('reception_status', ['accepted'])->count(),
+                'today_rejected' => $today->whereIn('reception_status', ['rejected', 'partial'])->count(),
             ],
         ]);
     }
 
-        public function registerReception(Request $request, $appointmentId): JsonResponse
+    public function registerReception(Request $request, $appointmentId): JsonResponse
     {
-        $appointment = Appointment::findOrFail($appointmentId);
+        $appointment = \App\Models\Appointment::with('items')->findOrFail($appointmentId);
  
         if ($appointment->type !== 'entrega') {
-            return response()->json(['message'=>'Solo se pueden registrar recepciones para entregas'], 422);
+            return response()->json(['message' => 'Solo se pueden registrar recepciones para entregas'], 422);
         }
  
         $request->validate([
-            'reception_status'  => 'required|in:accepted,rejected',
-            'reception_notes'   => 'nullable|string|max:2000',
-            'quantity_received' => 'required|numeric|min:0.01',
-            'unit_id'           => 'required|exists:units,id',
-            'quantity_rejected' => 'nullable|numeric|min:0',
-            'rejection_reason'  => 'nullable|in:inocuidad,calidad',
-            'photos'            => 'nullable|array|max:5',
-            'photos.*'          => 'file|image|max:5120',
+            'reception_notes' => 'nullable|string|max:2000',
+            'items'           => 'required|array|min:1',
+            'items.*.id'      => 'required|exists:appointment_items,id',
+            'items.*.quantity_received'  => 'required|numeric|min:0',
+            'items.*.received_unit_id'   => 'required|exists:units,id',
+            'items.*.quantity_rejected'  => 'nullable|numeric|min:0',
+            'items.*.rejection_reason'   => 'nullable|in:inocuidad,calidad',
+            'items.*.reception_notes'    => 'nullable|string|max:500',
         ], [
-            'quantity_received.required' => 'La cantidad recibida es requerida',
-            'quantity_received.min'      => 'La cantidad debe ser mayor a 0',
-            'unit_id.required'           => 'Selecciona una unidad de medida',
-            'rejection_reason.in'        => 'El motivo debe ser inocuidad o calidad',
+            'items.required'                    => 'Debes registrar al menos un ítem',
+            'items.*.quantity_received.required' => 'La cantidad recibida es requerida',
+            'items.*.received_unit_id.required'  => 'La unidad es requerida',
         ]);
  
-        // Si hay rechazo, validar que haya motivo y cantidad rechazada
-        if ($request->reception_status === 'rejected') {
-            if (!$request->rejection_reason) {
-                return response()->json([
-                    'message' => 'Debes indicar el motivo del rechazo',
-                    'errors'  => ['rejection_reason' => ['El motivo de rechazo es requerido']],
-                ], 422);
+        foreach ($request->items as $itemData) {
+            $item = AppointmentItem::find($itemData['id']);
+            if (!$item || $item->appointment_id !== $appointment->id) continue;
+ 
+            $qtyRec = (float) $itemData['quantity_received'];
+            $qtyRej = (float) ($itemData['quantity_rejected'] ?? 0);
+ 
+            // Determinar estado del ítem
+            if ($qtyRej >= $qtyRec && $qtyRec > 0) {
+                $status = 'rejected';
+            } elseif ($qtyRej > 0 && $qtyRej < $qtyRec) {
+                $status = 'partial';
+            } else {
+                $status = 'accepted';
             }
-            if (!$request->reception_notes) {
-                return response()->json([
-                    'message' => 'Las observaciones son obligatorias al rechazar',
-                    'errors'  => ['reception_notes' => ['Debes indicar observaciones']],
-                ], 422);
-            }
+ 
+            $item->update([
+                'quantity_received'  => $qtyRec,
+                'quantity_rejected'  => $qtyRej > 0 ? $qtyRej : null,
+                'received_unit_id'   => $itemData['received_unit_id'],
+                'reception_status'   => $status,
+                'rejection_reason'   => $itemData['rejection_reason'] ?? null,
+                'reception_notes'    => $itemData['reception_notes'] ?? null,
+            ]);
         }
  
-        $quantityReceived = (float) $request->quantity_received;
-        $quantityRejected = $request->filled('quantity_rejected') ? (float) $request->quantity_rejected : 0;
+        // Estado global de la recepción basado en los ítems
+        $appointment->refresh();
+        $allStatuses   = $appointment->items->pluck('reception_status');
+        $hasRejected   = $allStatuses->contains('rejected');
+        $hasPartial    = $allStatuses->contains('partial');
+        $allAccepted   = $allStatuses->every(fn($s) => $s === 'accepted');
+        $allRejected   = $allStatuses->every(fn($s) => $s === 'rejected');
  
-        // Validar que rechazado no supere recibido
-        if ($quantityRejected > $quantityReceived) {
-            return response()->json([
-                'message' => 'La cantidad rechazada no puede ser mayor a la recibida',
-                'errors'  => ['quantity_rejected' => ['No puede superar la cantidad recibida']],
-            ], 422);
-        }
- 
-        // Rechazo parcial: llegó algo y se rechazó algo
-        $isPartialRejection = $quantityRejected > 0 && $quantityRejected < $quantityReceived;
- 
-        // Estado final: si hay rechazo parcial → accepted (recibió algo)
-        //               si rechazó todo        → rejected
-        //               si aceptó todo         → accepted
-        $finalReceptionStatus = $request->reception_status;
-        if ($isPartialRejection) {
-            $finalReceptionStatus = 'accepted'; // aceptado aunque hubo devolución parcial
-        }
- 
-        // Estado de la cita
-        $finalAppointmentStatus = ($finalReceptionStatus === 'accepted' && $appointment->status === 'confirmed')
-            ? 'completed'
-            : $appointment->status;
- 
-        // Fotos
-        $photoPaths = $appointment->reception_photos ?? [];
-        if ($request->hasFile('photos')) {
-            foreach ($request->file('photos') as $photo) {
-                $photoPaths[] = $photo->store("appointments/{$appointment->id}/reception", 'documents');
-            }
-        }
+        $globalStatus = match(true) {
+            $allAccepted  => 'accepted',
+            $allRejected  => 'rejected',
+            default       => 'partial',
+        };
  
         $appointment->update([
-            'reception_status'      => $finalReceptionStatus,
+            'reception_status'      => $globalStatus,
             'reception_notes'       => $request->reception_notes ?? null,
-            'reception_photos'      => $photoPaths,
             'reception_reviewed_by' => auth()->id(),
             'reception_reviewed_at' => now(),
-            'quantity_received'     => $quantityReceived,
-            'quantity_rejected'     => $quantityRejected > 0 ? $quantityRejected : null,
-            'unit_id'               => $request->unit_id,
-            'rejection_reason'      => $request->rejection_reason ?? null,
-            'is_partial_rejection'  => $isPartialRejection,
-            'status'                => $finalAppointmentStatus,
+            'status'                => in_array($appointment->status, ['confirmed','scheduled']) ? 'completed' : $appointment->status,
         ]);
- 
-        $message = $isPartialRejection
-            ? "Recepción parcial registrada. Se devuelven {$quantityRejected} {$appointment->unit?->abbreviation} al proveedor."
-            : ($finalReceptionStatus === 'accepted'
-                ? 'Producto aceptado correctamente'
-                : 'Producto rechazado en su totalidad.');
  
         return response()->json([
-            'message'     => $message,
-            'appointment' => $this->formatAppointment($appointment->fresh(['provider','receptionReviewedBy','unit'])),
+            'message'     => 'Recepción registrada correctamente',
+            'appointment' => $this->formatAppointment(
+                $appointment->fresh(['provider', 'items.productService', 'items.unit', 'items.receivedUnit', 'receptionReviewedBy'])
+            ),
         ]);
     }
- 
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -513,75 +567,100 @@ class AppointmentController extends Controller
         return in_array($typeName, self::PROVIDER_TYPES_WITH_DOCS);
     }
 
-    private function formatAppointment(Appointment $a): array
+        protected function formatAppointment(Appointment $a): array
     {
-        $physicalDocs = null;
-        if ($a->physical_docs_status) {
-            $physicalDocs = is_string($a->physical_docs_status)
-                ? json_decode($a->physical_docs_status, true)
-                : $a->physical_docs_status;
-        }
-
         return [
             'id'                       => $a->id,
-            'provider'                 => $a->provider ? [
-                'id'            => $a->provider->id,
-                'business_name' => $a->provider->business_name,
-                'rfc'           => $a->provider->rfc,
-                'type'          => $a->provider->providerType?->name,
-                'type_id'       => $a->provider->provider_type_id,
-            ] : null,
-            'scheduled_by'             => $a->scheduledBy?->name,
+            'provider'                 => $a->provider ? ['id'=>$a->provider->id,'business_name'=>$a->provider->business_name,'rfc'=>$a->provider->rfc,'provider_type_id'=>$a->provider->provider_type_id] : null,
             'appointment_date'         => $a->appointment_date?->format('Y-m-d'),
             'appointment_time'         => $a->appointment_time,
             'type'                     => $a->type,
             'type_label'               => $a->type_label,
-            'vehicle_id'               => $a->vehicle_id,
-            'vehicle'                  => $a->vehicle ? ['id'=>$a->vehicle->id,'brand_model'=>$a->vehicle->brand_model,'plates'=>$a->vehicle->plates] : null,
-            'vehicle_custom'           => $a->vehicle_custom,
-            'vehicle_display'          => $a->vehicle_display,
-            'personnel_id'             => $a->personnel_id,
-            'personnel'                => $a->personnel ? ['id'=>$a->personnel->id,'full_name'=>$a->personnel->full_name,'position'=>$a->personnel->position] : null,
-            'driver_custom'            => $a->driver_custom,
-            'driver_display'           => $a->driver_display,
-            'provider_notes'           => $a->provider_notes,
-            'is_completed_by_provider' => $a->is_completed_by_provider,
-            'completed_by_provider_at' => $a->completed_by_provider_at?->format('Y-m-d H:i'),
-            'products'                 => $a->products,
-            'notes'                    => $a->notes,
-            'has_attachment'           => (bool)$a->attachment_path,
-            'attachment_name'          => $a->attachment_name,
             'status'                   => $a->status,
             'status_label'             => $a->status_label,
-            'cancellation_reason'      => $a->cancellation_reason,
-            'cancelled_by'             => $a->cancelledBy?->name,
-            'cancelled_at'             => $a->cancelled_at?->format('Y-m-d H:i'),
+            'notes'                    => $a->notes,
+            'products'                 => $a->products, // legacy
+            'has_attachment'           => (bool)$a->attachment_path,
+            'attachment_name'          => $a->attachment_name,
+            // Proveedor
+            'vehicle_display'          => $a->vehicle_display,
+            'driver_display'           => $a->driver_display,
+            'is_completed_by_provider' => $a->is_completed_by_provider,
+            'provider_notes'           => $a->provider_notes,
+            // Seguridad
             'is_entry_confirmed'       => $a->is_entry_confirmed,
             'entry_confirmed_at'       => $a->entry_confirmed_at?->format('H:i'),
-            'entry_confirmed_by'       => $a->entryConfirmedBy?->name,
             'entry_notes'              => $a->entry_notes,
             'actual_arrival_time'      => $a->actual_arrival_time,
             'arrived_on_time'          => $a->arrived_on_time,
             'delay_minutes'            => $a->delay_minutes,
-            'physical_docs_status'     => $physicalDocs,
-            'has_missing_docs'         => (bool)$a->has_missing_docs,
+            'has_missing_docs'         => $a->has_missing_docs,
+            'physical_docs_status'     => $a->physical_docs_status,
+            // No show
+            'is_no_show'               => $a->is_no_show,
+            'no_show_at'               => $a->no_show_at?->format('H:i'),
+            'no_show_notes'            => $a->no_show_notes,
+            // Recepción (legacy — un solo producto)
             'reception_status'         => $a->reception_status ?? 'pending',
             'reception_label'          => $a->reception_label,
             'reception_notes'          => $a->reception_notes,
-            'reception_photos'         => $a->reception_photos ?? [],
-            'is_reception_reviewed'    => $a->is_reception_reviewed,
             'reception_reviewed_by'    => $a->receptionReviewedBy?->name,
             'reception_reviewed_at'    => $a->reception_reviewed_at?->format('Y-m-d H:i'),
+            'is_reception_reviewed'    => $a->is_reception_reviewed,
             'quantity_received'        => $a->quantity_received,
             'quantity_rejected'        => $a->quantity_rejected,
-            'unit'                     => $a->unit ? ['id'=>$a->unit->id,'name'=>$a->unit->name,'abbreviation'             =>$a->unit->abbreviation] : null,
+            'unit'                     => $a->unit ? ['id'=>$a->unit->id,'name'=>$a->unit->name,'abbreviation'=>$a->unit->abbreviation] : null,
             'rejection_reason'         => $a->rejection_reason,
-            'rejection_reason_label'   => $a->rejection_reason_label,
             'is_partial_rejection'     => $a->is_partial_rejection,
-            'created_at'               => $a->created_at?->format('Y-m-d H:i'),
+            // ✅ ITEMS MÚLTIPLES
+            'items'                    => $a->items ? $a->items->map(fn($item) => [
+                'id'                    => $item->id,
+                'product_service_id'    => $item->product_service_id,
+                'product_name'          => $item->productService?->name,
+                'product_type'          => $item->productService?->type,
+                'quantity_expected'     => $item->quantity_expected,
+                'unit'                  => $item->unit ? ['id'=>$item->unit->id,'abbreviation'=>$item->unit->abbreviation,'name'=>$item->unit->name] : null,
+                'notes'                 => $item->notes,
+                'quantity_received'     => $item->quantity_received,
+                'quantity_rejected'     => $item->quantity_rejected,
+                'quantity_accepted'     => $item->quantity_accepted,
+                'received_unit'         => $item->receivedUnit ? ['id'=>$item->receivedUnit->id,'abbreviation'=>$item->receivedUnit->abbreviation] : null,
+                'reception_status'      => $item->reception_status,
+                'reception_status_label'=> $item->reception_status_label,
+                'rejection_reason'      => $item->rejection_reason,
+                'rejection_reason_label'=> $item->rejection_reason_label,
+                'reception_notes'       => $item->reception_notes,
+            ])->values() : [],
         ];
     }
 
+    // ── MÉTODO: markNoShow (NUEVO) ────────────────────────────────────
+    // POST /api/security/appointments/{id}/no-show
+ 
+    public function markNoShow(Request $request, $appointmentId): JsonResponse
+    {
+        $appointment = \App\Models\Appointment::findOrFail($appointmentId);
+ 
+        if (in_array($appointment->status, ['cancelled', 'completed', 'no_show'])) {
+            return response()->json(['message' => 'Esta cita no puede marcarse como no presentado'], 422);
+        }
+ 
+        $request->validate([
+            'no_show_notes' => 'nullable|string|max:500',
+        ]);
+ 
+        $appointment->update([
+            'status'                => 'no_show',
+            'no_show_at'            => now(),
+            'no_show_registered_by' => auth()->id(),
+            'no_show_notes'         => $request->no_show_notes ?? null,
+        ]);
+ 
+        return response()->json([
+            'message'     => 'Registrado como no presentado',
+            'appointment' => $this->formatAppointment($appointment->fresh(['provider'])),
+        ]);
+    }
     private function validateBusinessHours(string $date, string $time, callable $fail): void
     {
         $carbon = Carbon::parse($date);
@@ -618,5 +697,28 @@ class AppointmentController extends Controller
         } catch (\Exception $e) {
             Log::error('Error notificando cita al proveedor: '.$e->getMessage());
         }
+    }
+
+        public function getProviderProducts(Request $request, $providerId): JsonResponse
+    {
+        $provider = \App\Models\Provider::findOrFail($providerId);
+ 
+        $items = $provider->productsServices()
+            ->where('is_active', true)
+            ->with('category:id,name,type')
+            ->orderBy('type')
+            ->orderBy('name')
+            ->get()
+            ->map(fn($item) => [
+                'id'       => $item->id,
+                'name'     => $item->name,
+                'type'     => $item->type,
+                'category' => $item->category?->name,
+            ]);
+ 
+        return response()->json([
+            'products' => $items->where('type', 'product')->values(),
+            'services' => $items->where('type', 'service')->values(),
+        ]);
     }
 }
