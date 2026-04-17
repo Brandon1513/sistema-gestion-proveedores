@@ -1,10 +1,13 @@
 <?php
 
+use App\Http\Controllers\Api\AppointmentController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\CatalogImportController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\DocumentStatusController;
 use App\Http\Controllers\Api\DocumentValidationController;
 use App\Http\Controllers\Api\PasswordResetController;
+use App\Http\Controllers\Api\ProductsServicesCatalogController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\ProviderAccountController;
 use App\Http\Controllers\Api\ProviderCertificationController;
@@ -17,14 +20,9 @@ use App\Http\Controllers\Api\ProviderProfileController;
 use App\Http\Controllers\Api\ProviderTypeController;
 use App\Http\Controllers\Api\ProviderVehicleController;
 use App\Http\Controllers\Api\QualityDashboardController;
-use App\Http\Controllers\Api\CatalogImportController;
-
-use App\Http\Controllers\Api\ProductsServicesCatalogController;
-
+use App\Http\Controllers\Api\DocumentTypeController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-
-use App\Http\Controllers\Api\AppointmentController;
 
 /*
 |--------------------------------------------------------------------------
@@ -45,7 +43,7 @@ Route::get('/providers/{provider}/documents/{document}/view', [ProviderDocumentC
 
 // Rutas protegidas por autenticación
 Route::middleware('auth:sanctum')->group(function () {
-    
+
     // ===============================
     // AUTH
     // ===============================
@@ -55,32 +53,34 @@ Route::middleware('auth:sanctum')->group(function () {
     // ===============================
     // PERFIL DE USUARIO
     // ===============================
-    Route::get('/me/profile',          [ProfileController::class, 'show']);
-    Route::put('/me/profile',          [ProfileController::class, 'update']);
-    Route::patch('/me/password',       [ProfileController::class, 'updatePassword']);
+    Route::get('/me/profile',    [ProfileController::class, 'show']);
+    Route::put('/me/profile',    [ProfileController::class, 'update']);
+    Route::patch('/me/password', [ProfileController::class, 'updatePassword']);
+
     // ===============================
-    // Administración de cuentas de proveedores (solo para super_admin y admin)
+    // ADMINISTRACIÓN DE CUENTAS DE PROVEEDORES
     // ===============================
     Route::middleware(['role:super_admin,admin'])->prefix('provider-accounts')->group(function () {
-    Route::get('/',                        [ProviderAccountController::class, 'index']);
-    Route::patch('/{id}/toggle-status',    [ProviderAccountController::class, 'toggleStatus']);
-    Route::patch('/{id}/reset-password',   [ProviderAccountController::class, 'resetPassword']);
-    Route::post('/{id}/send-reset',        [ProviderAccountController::class, 'sendReset']);
+        Route::get('/',                      [ProviderAccountController::class, 'index']);
+        Route::patch('/{id}/toggle-status',  [ProviderAccountController::class, 'toggleStatus']);
+        Route::patch('/{id}/reset-password', [ProviderAccountController::class, 'resetPassword']);
+        Route::post('/{id}/send-reset',      [ProviderAccountController::class, 'sendReset']);
     });
-    
+
     // ===============================
     // DASHBOARD
     // ===============================
     Route::get('/dashboard', [DashboardController::class, 'index']);
     Route::get('/dashboard/statistics', [DashboardController::class, 'statistics']);
     Route::get('/documents/expiring', [DashboardController::class, 'expiringDocuments']);
+
     // ===============================
     // TIPOS DE PROVEEDORES
     // ===============================
     Route::get('/provider-types', [ProviderTypeController::class, 'index']);
     Route::get('/provider-types/{providerType}', [ProviderTypeController::class, 'show']);
     Route::get('/provider-types/{providerType}/required-documents', [ProviderTypeController::class, 'requiredDocuments']);
-    
+
     // ===============================
     // PROVEEDORES
     // ===============================
@@ -93,43 +93,52 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/documents', [ProviderDashboardController::class, 'documents']);
         Route::get('/documents/required', [ProviderDashboardController::class, 'requiredDocuments']);
         Route::get('/documents/expiring', [ProviderDashboardController::class, 'expiringDocuments']);
-        //  PROVEEDOR RUTAS DE UPLOAD
+
+        // Upload
         Route::post('/documents/upload', [ProviderDocumentUploadController::class, 'upload']);
         Route::delete('/documents/{id}', [ProviderDocumentUploadController::class, 'delete']);
         Route::get('/documents/{id}/download', [ProviderDocumentUploadController::class, 'download']);
 
-        // RUTAS DE PERFIL
+        // Perfil
         Route::get('/profile', [ProviderProfileController::class, 'show']);
         Route::put('/profile', [ProviderProfileController::class, 'update']);
-        
+
         // Contactos
         Route::get('/contacts', [ProviderProfileController::class, 'contacts']);
         Route::post('/contacts', [ProviderProfileController::class, 'storeContact']);
         Route::delete('/contacts/{id}', [ProviderProfileController::class, 'deleteContact']);
-        
+
         // Vehículos
         Route::get('/vehicles', [ProviderProfileController::class, 'vehicles']);
         Route::post('/vehicles', [ProviderProfileController::class, 'storeVehicle']);
         Route::delete('/vehicles/{id}', [ProviderProfileController::class, 'deleteVehicle']);
-        
+
         // Personal
         Route::get('/personnel', [ProviderProfileController::class, 'personnel']);
         Route::post('/personnel', [ProviderProfileController::class, 'storePersonnel']);
         Route::delete('/personnel/{id}', [ProviderProfileController::class, 'deletePersonnel']);
 
-        //  CERTIFICACIONES DEL PROVEEDOR
-        Route::get('/certifications',                [ProviderCertificationController::class, 'myIndex']);
-        Route::post('/certifications',               [ProviderCertificationController::class, 'myStore']);
-        Route::put('/certifications/{certification}',[ProviderCertificationController::class, 'myUpdate']);
-        Route::delete('/certifications/{certification}', [ProviderCertificationController::class, 'myDestroy']);
-        Route::get('/certifications/{certification}/download', [ProviderCertificationController::class, 'myDownload']);
+        // Certificaciones
+        Route::get('/certifications',                        [ProviderCertificationController::class, 'myIndex']);
+        Route::post('/certifications',                       [ProviderCertificationController::class, 'myStore']);
+        Route::put('/certifications/{certification}',        [ProviderCertificationController::class, 'myUpdate']);
+        Route::delete('/certifications/{certification}',     [ProviderCertificationController::class, 'myDestroy']);
+        Route::get('/certifications/{certification}/download',[ProviderCertificationController::class, 'myDownload']);
+
+        // Citas proveedor
+        Route::get('/appointments', [AppointmentController::class, 'myIndex']);
+        Route::post('/appointments/{appointmentId}/complete', [AppointmentController::class, 'providerComplete']);
+
+        // Catálogo proveedor
+        Route::get('/products-services', [ProductsServicesCatalogController::class, 'providerGetCatalog']);
+        Route::put('/products-services', [ProductsServicesCatalogController::class, 'providerUpdateSelection']);
     });
 
-    // Vista global (calidad/admin/compras)
+    // Vista global certificaciones
     Route::get('/certifications', [ProviderCertificationController::class, 'globalIndex']);
     Route::get('/certifications/pending-count', [ProviderCertificationController::class, 'pendingCount']);
-    
-    // Validar certificación (solo calidad/admin)
+
+    // Validar certificación
     Route::middleware(['role:super_admin,admin,calidad'])->group(function () {
         Route::post('/providers/{provider}/certifications/{certification}/validate',
             [ProviderCertificationController::class, 'validate']);
@@ -137,69 +146,82 @@ Route::middleware('auth:sanctum')->group(function () {
             [ProviderCertificationController::class, 'download']);
     });
 
-    
     // Vehículos de proveedores
     Route::get('/providers/{provider}/vehicles', [ProviderVehicleController::class, 'index']);
     Route::post('/providers/{provider}/vehicles', [ProviderVehicleController::class, 'store']);
     Route::put('/providers/{provider}/vehicles/{vehicle}', [ProviderVehicleController::class, 'update']);
     Route::delete('/providers/{provider}/vehicles/{vehicle}', [ProviderVehicleController::class, 'destroy']);
-    
+
     // Certificaciones de proveedores
     Route::get('/providers/{provider}/certifications', [ProviderCertificationController::class, 'index']);
     Route::post('/providers/{provider}/certifications', [ProviderCertificationController::class, 'store']);
     Route::put('/providers/{provider}/certifications/{certification}', [ProviderCertificationController::class, 'update']);
     Route::delete('/providers/{provider}/certifications/{certification}', [ProviderCertificationController::class, 'destroy']);
-    
+
     // ===============================
     // DOCUMENTOS DE PROVEEDORES
     // ===============================
     Route::get('/providers/{provider}/documents', [ProviderDocumentController::class, 'index']);
     Route::post('/providers/{provider}/documents', [ProviderDocumentController::class, 'store']);
     Route::get('/providers/{provider}/documents/required', [ProviderDocumentController::class, 'required']);
-    
-    // ⭐ IMPORTANTE: Ruta de descarga - debe estar ANTES del delete
-    
     Route::get('/providers/{provider}/documents/{document}/download', [ProviderDocumentController::class, 'download']);
-    // Eliminar documento
     Route::delete('/providers/{provider}/documents/{document}', [ProviderDocumentController::class, 'destroy']);
-    
+
     // ===============================
     // VALIDACIÓN DE DOCUMENTOS
-    // Solo accesible para: super_admin, admin, calidad
     // ===============================
     Route::middleware(['role:super_admin,admin,calidad'])->group(function () {
-        // Obtener documentos pendientes de validación
         Route::get('/documents/pending', [DocumentValidationController::class, 'pending']);
-        
-        // Validar documento específico (aprobar/rechazar)
         Route::post('/providers/{provider}/documents/{document}/validate', [DocumentValidationController::class, 'validate']);
     });
-    
-    // ⭐ HISTORIAL DE VALIDACIONES - ACCESIBLE PARA TODOS (con control interno)
-    // Esta ruta debe estar FUERA del middleware role porque el método history()
-    // ya controla los permisos internamente
+
+    // ===============================
+    // GESTIÓN DE TIPOS DE DOCUMENTOS (Calidad + Admin)
+    // ── Estáticas primero para evitar conflictos con {id} ──
+    // ===============================
+    Route::middleware(['role:calidad,super_admin,admin'])->group(function () {
+        // Sin parámetros
+        Route::get('/document-types',                       [DocumentTypeController::class, 'index']);
+        Route::post('/document-types',                      [DocumentTypeController::class, 'store']);
+        Route::post('/document-types/reorder',              [DocumentTypeController::class, 'reorder']);
+        Route::get('/document-types/provider-types',        [DocumentTypeController::class, 'providerTypes']);
+        Route::get('/document-types/groups',                [DocumentTypeController::class, 'getGroups']);
+        Route::post('/document-types/groups',               [DocumentTypeController::class, 'storeGroup']);
+        Route::post('/document-types/groups/reorder',       [DocumentTypeController::class, 'reorderGroups']);
+
+        // Con {id} — deben ir después de las estáticas
+        Route::put('/document-types/{id}',                  [DocumentTypeController::class, 'update']);
+        Route::patch('/document-types/{id}/toggle-active',  [DocumentTypeController::class, 'toggleActive']);
+        Route::delete('/document-types/{id}/provider-type', [DocumentTypeController::class, 'removeFromProviderType']);
+        Route::put('/document-types/groups/{id}',           [DocumentTypeController::class, 'updateGroup']);
+        Route::delete('/document-types/groups/{id}',        [DocumentTypeController::class, 'destroyGroup']);
+    });
+
+    // Historial de validaciones (control interno en el método)
     Route::get('/documents/{document}/history', [DocumentValidationController::class, 'history']);
 
-
+    // ===============================
+    // CALIDAD DASHBOARD
+    // ===============================
     Route::middleware(['role:super_admin,admin,calidad'])->group(function () {
-    Route::get('/quality/dashboard/stats', [QualityDashboardController::class, 'stats']);
-    Route::get('/quality/dashboard/activity', [QualityDashboardController::class, 'recentActivity']);
-});
-     // ===============================
+        Route::get('/quality/dashboard/stats',    [QualityDashboardController::class, 'stats']);
+        Route::get('/quality/dashboard/activity', [QualityDashboardController::class, 'recentActivity']);
+    });
+
+    // ===============================
     // USUARIOS
     // ===============================
     Route::middleware(['role:super_admin'])->prefix('users')->group(function () {
-    Route::get('/', [App\Http\Controllers\Api\UserManagementController::class, 'index']);
-    Route::get('/roles', [App\Http\Controllers\Api\UserManagementController::class, 'getRoles']);
-    Route::post('/', [App\Http\Controllers\Api\UserManagementController::class, 'store']);
-    Route::get('/{id}', [App\Http\Controllers\Api\UserManagementController::class, 'show']);
-    Route::put('/{id}', [App\Http\Controllers\Api\UserManagementController::class, 'update']);
-    Route::patch('/{id}/password', [App\Http\Controllers\Api\UserManagementController::class, 'updatePassword']);
-    Route::patch('/{id}/toggle-status', [App\Http\Controllers\Api\UserManagementController::class, 'toggleStatus']);
-    Route::delete('/{id}', [App\Http\Controllers\Api\UserManagementController::class, 'destroy']);
-});
+        Route::get('/',                     [App\Http\Controllers\Api\UserManagementController::class, 'index']);
+        Route::get('/roles',                [App\Http\Controllers\Api\UserManagementController::class, 'getRoles']);
+        Route::post('/',                    [App\Http\Controllers\Api\UserManagementController::class, 'store']);
+        Route::get('/{id}',                 [App\Http\Controllers\Api\UserManagementController::class, 'show']);
+        Route::put('/{id}',                 [App\Http\Controllers\Api\UserManagementController::class, 'update']);
+        Route::patch('/{id}/password',      [App\Http\Controllers\Api\UserManagementController::class, 'updatePassword']);
+        Route::patch('/{id}/toggle-status', [App\Http\Controllers\Api\UserManagementController::class, 'toggleStatus']);
+        Route::delete('/{id}',              [App\Http\Controllers\Api\UserManagementController::class, 'destroy']);
+    });
 
-    
     // ===============================
     // INVITACIONES
     // ===============================
@@ -209,92 +231,76 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/invitations/{invitation}', [ProviderInvitationController::class, 'cancel']);
 
     // ===============================
-    // ESTADÍSTICAS DE CALIDAD
+    // ESTADO DOCUMENTAL
     // ===============================
-
     Route::middleware(['role:super_admin,admin,compras,calidad'])->group(function () {
-    Route::get('/documents/status', [DocumentStatusController::class, 'index']);
+        Route::get('/documents/status', [DocumentStatusController::class, 'index']);
     });
 
     // ===============================
     // CITAS (CALENDARIO)
     // ===============================
- 
-    // Vista Compras / Admin — crear, editar, cancelar, ver
+
+    // Compras / Admin
     Route::middleware(['role:super_admin,admin,compras'])->prefix('appointments')->group(function () {
-        Route::get('/',                        [AppointmentController::class, 'index']);
-        Route::post('/',                       [AppointmentController::class, 'store']);
-        Route::get('/{appointment}',           [AppointmentController::class, 'show']);
-        Route::put('/{appointment}',           [AppointmentController::class, 'update']);
-        Route::post('/{appointment}/cancel',   [AppointmentController::class, 'cancel']);
-    });
- 
-    // Descarga de adjunto — accesible para Compras/Admin Y proveedor dueño
-    // (el controller valida internamente quién puede acceder)
-    Route::get('/appointments/{appointment}/attachment', [AppointmentController::class, 'downloadAttachment']);
-    // ── Seguridad ────────────────────────────────────────────────────
-    Route::middleware(['role:super_admin,admin,seguridad'])->prefix('security')->group(function () {
-        Route::get('/appointments',                         [AppointmentController::class, 'securityIndex']);
-        Route::post('/appointments/{id}/confirm-entry',     [AppointmentController::class, 'confirmEntry']);
-        Route::post('/appointments/{id}/no-show', [AppointmentController::class, 'markNoShow']);
+        Route::get('/',                      [AppointmentController::class, 'index']);
+        Route::post('/',                     [AppointmentController::class, 'store']);
+        Route::get('/{appointment}',         [AppointmentController::class, 'show']);
+        Route::put('/{appointment}',         [AppointmentController::class, 'update']);
+        Route::post('/{appointment}/cancel', [AppointmentController::class, 'cancel']);
     });
 
-    // ── Fuera de grupos — accesible para Compras y Admin ────────────
+    // Descarga adjunto
+    Route::get('/appointments/{appointment}/attachment', [AppointmentController::class, 'downloadAttachment']);
+
+    // Seguridad
+    Route::middleware(['role:super_admin,admin,seguridad'])->prefix('security')->group(function () {
+        Route::get('/appointments',                     [AppointmentController::class, 'securityIndex']);
+        Route::post('/appointments/{id}/confirm-entry', [AppointmentController::class, 'confirmEntry']);
+        Route::post('/appointments/{id}/no-show',       [AppointmentController::class, 'markNoShow']);
+    });
+
+    // Productos para citas — Compras/Admin
     Route::middleware(['role:super_admin,admin,compras'])->group(function () {
-        Route::get('/providers/{id}/appointment-products',
-            [AppointmentController::class, 'getProviderProducts']);
+        Route::get('/providers/{id}/appointment-products', [AppointmentController::class, 'getProviderProducts']);
     });
- 
-    
-    // ── Ingeniero de Alimentos ───────────────────────────────────────
+
+    // Ingeniero de Alimentos + Seguridad (solo lectura)
     Route::middleware(['role:super_admin,admin,ingeniero_alimentos,seguridad'])->prefix('food-engineer')->group(function () {
-    Route::get('/appointments', [AppointmentController::class, 'foodEngineerIndex']);
-    Route::post('/appointments/{id}/reception', [AppointmentController::class, 'registerReception']);
+        Route::get('/appointments', [AppointmentController::class, 'foodEngineerIndex']);
+        Route::post('/appointments/{id}/reception', [AppointmentController::class, 'registerReception']);
     });
- 
-    // Vista proveedor — solo sus propias citas
-    Route::prefix('provider')->middleware('role:proveedor')->group(function () {
-        // ... (agregar dentro del grupo provider que ya existe)
-        Route::get('/appointments', [AppointmentController::class, 'myIndex']);
-        Route::post('/appointments/{appointmentId}/complete', [AppointmentController::class, 'providerComplete']);
-    });
+
+    // Config citas físicas
     Route::get('/appointments/{id}/physical-docs-config', [AppointmentController::class, 'getPhysicalDocsConfig']);
-    
-    // Unidades de medida — accesible para ingeniero y compras
+
+    // Unidades de medida
     Route::get('/units', [App\Http\Controllers\Api\UnitController::class, 'index']);
 
-    // Catálogo global (lectura para todos los roles internos)
-Route::get('/catalog', [ProductsServicesCatalogController::class, 'index']);
- 
-// Gestión del catálogo — solo Compras/Admin
-// Gestión del catálogo — solo Compras/Admin
-Route::middleware(['role:super_admin,admin,compras'])->prefix('catalog')->group(function () {
-    // Categorías
-    Route::get('/categories',         [ProductsServicesCatalogController::class, 'getCategories']);
-    Route::post('/categories',        [ProductsServicesCatalogController::class, 'storeCategory']);
-    Route::put('/categories/{id}',    [ProductsServicesCatalogController::class, 'updateCategory']);
-    // Ítems
-    Route::get('/items',              [ProductsServicesCatalogController::class, 'getItems']);
-    Route::post('/items',             [ProductsServicesCatalogController::class, 'storeItem']);
-    Route::put('/items/{id}',         [ProductsServicesCatalogController::class, 'updateItem']);
-    Route::delete('/items/{id}',      [ProductsServicesCatalogController::class, 'destroyItem']);
-    // ✅ Solo /import, sin repetir /catalog
-    Route::post('/import',            [CatalogImportController::class, 'import']);
-});
+    // ===============================
+    // CATÁLOGO DE PRODUCTOS Y SERVICIOS
+    // ===============================
 
-Route::middleware(['role:super_admin,admin,compras'])->group(function () {
-    Route::put('/providers/{id}/products-services-sync',
-        [ProductsServicesCatalogController::class, 'syncProviderItems']);
-});
- 
-// Ver selección de un proveedor — Compras/Admin
-Route::get('/providers/{id}/products-services', [ProductsServicesCatalogController::class, 'providerItems']);
- 
-// Portal proveedor — ver y actualizar su selección
-Route::prefix('provider')->middleware('role:proveedor')->group(function () {
-    // ... (dentro del grupo provider que ya existe)
-    Route::get('/products-services',  [ProductsServicesCatalogController::class, 'providerGetCatalog']);
-    Route::put('/products-services',  [ProductsServicesCatalogController::class, 'providerUpdateSelection']);
-});
+    // Lectura global
+    Route::get('/catalog', [ProductsServicesCatalogController::class, 'index']);
+
+    // Gestión — Compras/Admin
+    Route::middleware(['role:super_admin,admin,compras'])->prefix('catalog')->group(function () {
+        Route::get('/categories',      [ProductsServicesCatalogController::class, 'getCategories']);
+        Route::post('/categories',     [ProductsServicesCatalogController::class, 'storeCategory']);
+        Route::put('/categories/{id}', [ProductsServicesCatalogController::class, 'updateCategory']);
+        Route::get('/items',           [ProductsServicesCatalogController::class, 'getItems']);
+        Route::post('/items',          [ProductsServicesCatalogController::class, 'storeItem']);
+        Route::put('/items/{id}',      [ProductsServicesCatalogController::class, 'updateItem']);
+        Route::delete('/items/{id}',   [ProductsServicesCatalogController::class, 'destroyItem']);
+        Route::post('/import',         [CatalogImportController::class, 'import']);
+    });
+
+    Route::middleware(['role:super_admin,admin,compras'])->group(function () {
+        Route::put('/providers/{id}/products-services-sync',
+            [ProductsServicesCatalogController::class, 'syncProviderItems']);
+    });
+
+    Route::get('/providers/{id}/products-services', [ProductsServicesCatalogController::class, 'providerItems']);
 
 });

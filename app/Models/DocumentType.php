@@ -16,10 +16,13 @@ class DocumentType extends Model
         'name',
         'description',
         'category',
+        'group_name',       // NUEVO
+        'sort_order',       // NUEVO
+        'is_active',        // NUEVO
         'requires_expiry',
         'expiry_alert_days',
         'is_required',
-        'allows_multiple',   // ← nuevo: permite múltiples cargas del mismo tipo
+        'allows_multiple',
         'allowed_extensions',
         'max_file_size_mb',
     ];
@@ -31,12 +34,13 @@ class DocumentType extends Model
         'allowed_extensions' => 'array',
         'max_file_size_mb'   => 'integer',
         'expiry_alert_days'  => 'integer',
+        'is_active'          => 'boolean',
     ];
 
     public function providerTypes(): BelongsToMany
     {
         return $this->belongsToMany(ProviderType::class, 'document_type_provider_type')
-            ->withPivot('is_required')
+            ->withPivot(['is_required', 'sort_order', 'applies_to_existing'])
             ->withTimestamps();
     }
 
