@@ -360,7 +360,7 @@ class AppointmentController extends Controller
             'actual_arrival_time'  => $request->actual_arrival_time,
             'arrived_on_time'      => $arrivedOnTime,
             'delay_minutes'        => $delayMinutes > 0 ? $delayMinutes : null,
-            'physical_docs_status' => $physicalDocsStatus ? json_encode($physicalDocsStatus) : null,
+            'physical_docs_status' => $physicalDocsStatus ?: null,
             'has_missing_docs'     => $hasMissingDocs,
             'status'               => 'confirmed',
         ]);
