@@ -16,11 +16,12 @@ class DocumentType extends Model
         'name',
         'description',
         'category',
-        'group_name',       // NUEVO
-        'sort_order',       // NUEVO
-        'is_active',        // NUEVO
+        'group_name',
+        'sort_order',
+        'is_active',
         'requires_expiry',
         'expiry_alert_days',
+        'expiry_months',        // ✅ NUEVO
         'is_required',
         'allows_multiple',
         'allowed_extensions',
@@ -30,10 +31,11 @@ class DocumentType extends Model
     protected $casts = [
         'requires_expiry'    => 'boolean',
         'is_required'        => 'boolean',
-        'allows_multiple'    => 'boolean',  // ← nuevo
+        'allows_multiple'    => 'boolean',
         'allowed_extensions' => 'array',
         'max_file_size_mb'   => 'integer',
         'expiry_alert_days'  => 'integer',
+        'expiry_months'      => 'integer',  // ✅ NUEVO
         'is_active'          => 'boolean',
     ];
 
@@ -51,9 +53,7 @@ class DocumentType extends Model
 
     public function isValidExtension(string $extension): bool
     {
-        if (!$this->allowed_extensions) {
-            return true;
-        }
+        if (!$this->allowed_extensions) return true;
         return in_array(strtolower($extension), $this->allowed_extensions);
     }
 

@@ -46,6 +46,7 @@ class DocumentTypeController extends Controller
                     'is_required'         => $pivot?->is_required ?? false,
                     'pivot_sort_order'    => $pivot?->sort_order ?? 0,
                     'applies_to_existing' => $pivot?->applies_to_existing ?? true,
+                    'expiry_months'      => $doc->expiry_months,
                     // ✅ Array completo de provider_types para que el modal
                     //    pueda preseleccionar los checkboxes correctamente
                     'provider_types'      => $doc->providerTypes->map(fn($ptype) => [
@@ -101,6 +102,7 @@ class DocumentTypeController extends Controller
             'provider_type_ids.*' => 'exists:provider_types,id',
             'is_required_map'     => 'nullable|array',   // { provider_type_id: bool }
             'applies_to_existing' => 'boolean',
+            'expiry_months' => 'nullable|integer|min:1|max:120',
         ]);
 
         DB::beginTransaction();
@@ -120,6 +122,7 @@ class DocumentTypeController extends Controller
                 'max_file_size_mb'   => $validated['max_file_size_mb'] ?? 10,
                 'is_active'          => true,
                 'is_required'        => false,
+                'expiry_months' => $validated['expiry_months'] ?? null,
             ]);
 
             // Asignar a tipos de proveedor
@@ -168,6 +171,7 @@ class DocumentTypeController extends Controller
             'provider_type_ids.*' => 'exists:provider_types,id',
             'is_required_map'     => 'nullable|array',
             'applies_to_existing' => 'boolean',
+            'expiry_months' => 'nullable|integer|min:1|max:120',
         ]);
 
         DB::beginTransaction();
@@ -186,6 +190,7 @@ class DocumentTypeController extends Controller
                 : ($validated['allowed_extensions'] ?? null),
                 'max_file_size_mb'   => $validated['max_file_size_mb'] ?? 10,
                 'is_active'          => $validated['is_active'] ?? true,
+                'expiry_months' => $validated['expiry_months'] ?? null,
             ]);
 
             if (isset($validated['provider_type_ids'])) {

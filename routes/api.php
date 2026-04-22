@@ -5,6 +5,8 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CatalogImportController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\DocumentStatusController;
+use App\Http\Controllers\Api\DocumentTemplateController;
+use App\Http\Controllers\Api\DocumentTypeController;
 use App\Http\Controllers\Api\DocumentValidationController;
 use App\Http\Controllers\Api\PasswordResetController;
 use App\Http\Controllers\Api\ProductsServicesCatalogController;
@@ -20,7 +22,6 @@ use App\Http\Controllers\Api\ProviderProfileController;
 use App\Http\Controllers\Api\ProviderTypeController;
 use App\Http\Controllers\Api\ProviderVehicleController;
 use App\Http\Controllers\Api\QualityDashboardController;
-use App\Http\Controllers\Api\DocumentTypeController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -93,6 +94,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/documents', [ProviderDashboardController::class, 'documents']);
         Route::get('/documents/required', [ProviderDashboardController::class, 'requiredDocuments']);
         Route::get('/documents/expiring', [ProviderDashboardController::class, 'expiringDocuments']);
+        Route::get('/products-services-my', [ProviderDashboardController::class, 'myProductsServices']);
 
         // Upload
         Route::post('/documents/upload', [ProviderDocumentUploadController::class, 'upload']);
@@ -196,6 +198,20 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/document-types/groups/{id}',           [DocumentTypeController::class, 'updateGroup']);
         Route::delete('/document-types/groups/{id}',        [DocumentTypeController::class, 'destroyGroup']);
     });
+
+        // ── Gestión de templates (Calidad + Admin) ────────────────────────────────────
+    Route::middleware(['role:calidad,super_admin,admin'])->group(function () {
+        Route::get('/document-templates',           [App\Http\Controllers\Api\DocumentTemplateController::class, 'index']);
+        Route::get('/document-templates/catalog-products', [DocumentTemplateController::class, 'getCatalogProducts']);
+        Route::post('/document-templates',          [App\Http\Controllers\Api\DocumentTemplateController::class, 'store']);
+        Route::delete('/document-templates/{id}',   [App\Http\Controllers\Api\DocumentTemplateController::class, 'destroy']);
+    });
+    
+    // ── Consulta de template por producto (todos los roles autenticados) ──────────
+    Route::get('/document-templates/by-product',   [App\Http\Controllers\Api\DocumentTemplateController::class, 'getByProduct']);
+    
+    // ── Descarga de template (todos los roles autenticados, incluyendo proveedor) ─
+    Route::get('/document-templates/{id}/download', [App\Http\Controllers\Api\DocumentTemplateController::class, 'download']);
 
     // Historial de validaciones (control interno en el método)
     Route::get('/documents/{document}/history', [DocumentValidationController::class, 'history']);

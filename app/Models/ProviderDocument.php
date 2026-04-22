@@ -26,6 +26,7 @@ class ProviderDocument extends Model
         'notes',
         'version',
         'uploaded_by',
+        'product_name',
     ];
 
     protected $casts = [
