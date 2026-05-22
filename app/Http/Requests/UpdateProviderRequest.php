@@ -19,7 +19,7 @@ class UpdateProviderRequest extends FormRequest
         return [
             'provider_type_id' => ['sometimes', 'exists:provider_types,id'],
             'business_name' => ['sometimes', 'string', 'max:255'],
-            'rfc' => ['sometimes', 'string', 'size:13', Rule::unique('providers')->ignore($providerId)],
+           'rfc' => ['sometimes', 'string', 'min:12', 'max:13', Rule::unique('providers')->ignore($providerId), 'regex:/^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/'],
             'legal_representative' => ['nullable', 'string', 'max:255'],
             'street' => ['sometimes', 'string', 'max:255'],
             'exterior_number' => ['sometimes', 'string', 'max:20'],

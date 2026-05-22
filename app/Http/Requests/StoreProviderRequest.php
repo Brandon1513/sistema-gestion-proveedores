@@ -16,7 +16,7 @@ class StoreProviderRequest extends FormRequest
         return [
             'provider_type_id' => ['required', 'exists:provider_types,id'],
             'business_name' => ['required', 'string', 'max:255'],
-            'rfc' => ['required', 'string', 'size:13', 'unique:providers,rfc'],
+            'rfc' => ['required', 'string', 'min:12', 'max:13', 'unique:providers,rfc', 'regex:/^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/'],
             'legal_representative' => ['nullable', 'string', 'max:255'],
             'street' => ['required', 'string', 'max:255'],
             'exterior_number' => ['required', 'string', 'max:20'],
