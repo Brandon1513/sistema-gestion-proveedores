@@ -18,7 +18,18 @@ class RegisterProviderRequest extends FormRequest
             'name'          => 'required|string|max:255',
             'business_name' => 'required|string|max:255',
             //  min:12|max:13 — persona moral = 12, persona física = 13
-            'rfc'           => 'required|string|min:12|max:13|unique:providers,rfc|regex:/^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/',
+            'rfc' => [
+                    'required', 'string', 'min:12', 'max:13',
+                    'regex:/^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/',
+                    // Ignorar unique si ya existe un proveedor con el email de la invitación
+                    \Illuminate\Validation\Rule::unique('providers', 'rfc')->where(function ($query) {
+                        $token = $this->token;
+                        $invitation = \App\Models\ProviderInvitation::where('token', $token)->first();
+                        if ($invitation) {
+                            $query->where('email', '!=', $invitation->email);
+                        }
+                    }),
+                ],
             'password'      => 'required|string|min:8|confirmed',
         ];
     }

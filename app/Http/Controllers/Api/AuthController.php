@@ -92,22 +92,34 @@ class AuthController extends Controller
             DB::beginTransaction();
 
             $user = User::create([
-                'name' => $request->name,
-                'email' => $invitation->email,
-                'password' => Hash::make($request->password),
+                'name'              => $request->name,
+                'email'             => $invitation->email,
+                'password'          => Hash::make($request->password),
                 'email_verified_at' => now(),
             ]);
 
             $user->assignRole('proveedor');
 
-            $provider = Provider::create([
-                'provider_type_id' => $invitation->provider_type_id,
-                'business_name' => $request->business_name,
-                'rfc' => strtoupper($request->rfc),
-                'email' => $invitation->email,
-                'status' => 'pending',
-                'created_by' => $invitation->invited_by,
-            ]);
+            // ✅ Detectar si ya existe un proveedor creado manualmente con este email
+            $provider = Provider::where('email', $invitation->email)->first();
+
+            if ($provider) {
+                // Proveedor creado manualmente — actualizar con los datos del registro
+                $provider->update([
+                    'business_name' => $request->business_name,
+                    'rfc'           => strtoupper($request->rfc),
+                ]);
+            } else {
+                // Flujo normal de invitación — crear proveedor nuevo
+                $provider = Provider::create([
+                    'provider_type_id' => $invitation->provider_type_id,
+                    'business_name'    => $request->business_name,
+                    'rfc'              => strtoupper($request->rfc),
+                    'email'            => $invitation->email,
+                    'status'           => 'pending',
+                    'created_by'       => $invitation->invited_by,
+                ]);
+            }
 
             $invitation->markAsAccepted($provider);
 
@@ -118,15 +130,15 @@ class AuthController extends Controller
             return response()->json([
                 'message' => 'Registro exitoso',
                 'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
+                    'id'    => $user->id,
+                    'name'  => $user->name,
                     'email' => $user->email,
                     'roles' => $user->roles->pluck('name'),
                 ],
                 'provider' => [
-                    'id' => $provider->id,
+                    'id'            => $provider->id,
                     'business_name' => $provider->business_name,
-                    'status' => $provider->status,
+                    'status'        => $provider->status,
                 ],
                 'token' => $token,
             ], 201);
@@ -135,7 +147,7 @@ class AuthController extends Controller
             DB::rollBack();
             return response()->json([
                 'message' => 'Error al registrar proveedor',
-                'error' => $e->getMessage(),
+                'error'   => $e->getMessage(),
             ], 500);
         }
     }
