@@ -12,6 +12,28 @@ class UpdateProviderRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+{
+    $this->merge([
+        'credit_amount'      => $this->credit_amount === '' ? null : $this->credit_amount,
+        'credit_days'        => $this->credit_days   === '' ? null : $this->credit_days,
+        'account_number'     => $this->account_number === '' ? null : $this->account_number,
+        'clabe'              => $this->clabe           === '' ? null : $this->clabe,
+        'phone'              => $this->phone           === '' ? null : $this->phone,
+        'bank'               => $this->bank            === '' ? null : $this->bank,
+        'bank_branch'        => $this->bank_branch     === '' ? null : $this->bank_branch,
+        'legal_representative' => $this->legal_representative === '' ? null : $this->legal_representative,
+        'interior_number'    => $this->interior_number === '' ? null : $this->interior_number,
+        'observations'       => $this->observations    === '' ? null : $this->observations,
+        'street'             => $this->street          === '' ? null : $this->street,
+        'exterior_number'    => $this->exterior_number === '' ? null : $this->exterior_number,
+        'neighborhood'       => $this->neighborhood    === '' ? null : $this->neighborhood,
+        'city'               => $this->city            === '' ? null : $this->city,
+        'state'              => $this->state           === '' ? null : $this->state,
+        'postal_code'        => $this->postal_code     === '' ? null : $this->postal_code,
+    ]);
+}
+
     public function rules(): array
     {
         $providerId = $this->route('provider')->id;
