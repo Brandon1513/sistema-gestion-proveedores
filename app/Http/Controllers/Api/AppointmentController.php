@@ -169,7 +169,22 @@ class AppointmentController extends Controller
         }
         unset($validated['attachment']);
         $appointment->update($validated);
-        return response()->json(['message'=>'Cita actualizada','appointment'=>$this->formatAppointment($appointment->fresh(['provider','scheduledBy','vehicle','personnel']))]);
+
+        // ✅ Sincronizar items
+        if ($request->has('items') && is_array($request->items)) {
+            $appointment->items()->delete();
+            foreach ($request->items as $item) {
+                if (!empty($item['product_service_id'])) {
+                    $appointment->items()->create([
+                        'product_service_id' => $item['product_service_id'],
+                        'quantity_expected'  => $item['quantity_expected'] ?? null,
+                        'unit_id'            => $item['unit_id'] ?? null,
+                    ]);
+                }
+            }
+        }
+
+        return response()->json(['message'=>'Cita actualizada','appointment'=>$this->formatAppointment($appointment->fresh(['provider','scheduledBy','vehicle','personnel','items']))]);
     }
 
     public function cancel(Request $request, Appointment $appointment): JsonResponse
