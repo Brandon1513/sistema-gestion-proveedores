@@ -682,10 +682,10 @@ class AppointmentController extends Controller
         $hour   = (int) explode(':', $time)[0];
         if ($carbon->dayOfWeek === Carbon::SUNDAY) { $fail('No se agendan citas los domingos'); return; }
         if ($carbon->dayOfWeek === Carbon::SATURDAY) {
-            if ($hour < 8 || $hour >= 14) $fail('Los sábados el horario es de 8:00 a 14:00');
+            if ($hour < 8 || $hour > 14) $fail('Los sábados el horario es de 8:00 a 14:00');
             return;
         }
-        if ($hour < 8 || $hour >= 18) $fail('El horario de lunes a viernes es de 8:00 a 18:00');
+        if ($hour < 8 || $hour > 18) $fail('El horario de lunes a viernes es de 8:00 a 18:00');
     }
 
     private function notifyProvider(Appointment $appointment, string $action): void
