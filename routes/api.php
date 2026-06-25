@@ -168,6 +168,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/providers/{provider}/documents/required', [ProviderDocumentController::class, 'required']);
     Route::get('/providers/{provider}/documents/{document}/download', [ProviderDocumentController::class, 'download']);
     Route::delete('/providers/{provider}/documents/{document}', [ProviderDocumentController::class, 'destroy']);
+    Route::get('/provider-types/{providerType}/all-documents', [ProviderTypeController::class, 'allDocuments']);
 
     // ===============================
     // VALIDACIÓN DE DOCUMENTOS

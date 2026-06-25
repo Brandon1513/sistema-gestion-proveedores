@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Provider;
+use App\Models\ProviderType;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -12,19 +13,16 @@ use Illuminate\Support\Facades\Password;
 
 class ProviderAccountController extends Controller
 {
-    /**
-     * Listar cuentas de proveedores con su información vinculada
-     * GET /api/provider-accounts
-     */
     public function index(Request $request): JsonResponse
     {
         $query = User::with('roles')
             ->whereHas('roles', fn($q) => $q->where('name', 'proveedor'));
 
-        if ($request->search) {
-            $query->where(function ($q) use ($request) {
-                $q->where('name',  'like', "%{$request->search}%")
-                  ->orWhere('email', 'like', "%{$request->search}%");
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('name',  'like', "%{$search}%")
+                  ->orWhere('email', 'like', "%{$search}%");
             });
         }
 
@@ -32,15 +30,24 @@ class ProviderAccountController extends Controller
             $query->where('is_active', (bool) $request->is_active);
         }
 
-        $users = $query->latest()->paginate(20);
+        // ── Filtro por tipo de proveedor ──────────────────────────────────
+        if ($request->filled('provider_type_id')) {
+            $providerTypeId = $request->provider_type_id;
+            $providerEmails = Provider::where('provider_type_id', $providerTypeId)
+                ->pluck('email');
+            $query->whereIn('email', $providerEmails);
+        }
 
-        // Enriquecer cada usuario con datos del proveedor vinculado
+        $perPage = min((int) ($request->per_page ?? 20), 100);
+        $users   = $query->latest()->paginate($perPage);
+
+        // Enriquecer con datos del proveedor vinculado
         $users->getCollection()->transform(function ($user) {
             $provider = Provider::where('email', $user->email)
                 ->with('providerType:id,name')
                 ->first();
 
-            $user->provider         = $provider ? [
+            $user->provider = $provider ? [
                 'id'            => $provider->id,
                 'business_name' => $provider->business_name,
                 'rfc'           => $provider->rfc,
@@ -54,10 +61,6 @@ class ProviderAccountController extends Controller
         return response()->json($users);
     }
 
-    /**
-     * Activar / desactivar cuenta de proveedor — cambia providers.status
-     * PATCH /api/provider-accounts/{id}/toggle-status
-     */
     public function toggleStatus(int $id): JsonResponse
     {
         $user = User::whereHas('roles', fn($q) => $q->where('name', 'proveedor'))
@@ -71,23 +74,18 @@ class ProviderAccountController extends Controller
             ], 404);
         }
 
-        // Toggle entre active e inactive
         $newStatus = $provider->status === 'active' ? 'inactive' : 'active';
         $provider->update(['status' => $newStatus]);
 
         return response()->json([
-            'message'    => $newStatus === 'active'
+            'message'   => $newStatus === 'active'
                 ? 'Cuenta del proveedor activada correctamente'
                 : 'Cuenta del proveedor desactivada correctamente',
-            'status'     => $newStatus,
-            'is_active'  => $newStatus === 'active',
+            'status'    => $newStatus,
+            'is_active' => $newStatus === 'active',
         ]);
     }
 
-    /**
-     * Resetear contraseña manualmente (sin email)
-     * PATCH /api/provider-accounts/{id}/reset-password
-     */
     public function resetPassword(Request $request, int $id): JsonResponse
     {
         $user = User::whereHas('roles', fn($q) => $q->where('name', 'proveedor'))
@@ -102,19 +100,11 @@ class ProviderAccountController extends Controller
         ]);
 
         $user->update(['password' => Hash::make($request->password)]);
-
-        // Revocar todos los tokens activos
         $user->tokens()->delete();
 
-        return response()->json([
-            'message' => 'Contraseña restablecida correctamente',
-        ]);
+        return response()->json(['message' => 'Contraseña restablecida correctamente']);
     }
 
-    /**
-     * Enviar email de reset al proveedor
-     * POST /api/provider-accounts/{id}/send-reset
-     */
     public function sendReset(int $id): JsonResponse
     {
         $user = User::whereHas('roles', fn($q) => $q->where('name', 'proveedor'))

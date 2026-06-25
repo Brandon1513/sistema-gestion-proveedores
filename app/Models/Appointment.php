@@ -14,7 +14,7 @@ class Appointment extends Model
 
     protected $fillable = [
         'provider_id', 'scheduled_by',
-        'appointment_date', 'appointment_time', 'type',
+        'appointment_date', 'appointment_time', 'duration_minutes', 'type',
         'vehicle_id', 'vehicle_custom', 'personnel_id', 'driver_custom',
         'provider_notes', 'completed_by_provider_at',
         'products', 'notes', 'attachment_path', 'attachment_name',
@@ -43,6 +43,7 @@ class Appointment extends Model
         'is_partial_rejection'     => 'boolean',
         'quantity_received'        => 'decimal:2',
         'quantity_rejected'        => 'decimal:2',
+        'duration_minutes'         => 'integer',
     ];
 
     const TYPE_LABELS = [
@@ -73,19 +74,68 @@ class Appointment extends Model
         'calidad'   => 'Calidad',
     ];
 
-    public function getTypeLabelAttribute(): string      { return self::TYPE_LABELS[$this->type] ?? $this->type; }
-    public function getStatusLabelAttribute(): string    { return self::STATUS_LABELS[$this->status] ?? $this->status; }
-    public function getReceptionLabelAttribute(): string { return self::RECEPTION_LABELS[$this->reception_status ?? 'pending'] ?? 'Pendiente'; }
-    public function getVehicleDisplayAttribute(): ?string {
-        return $this->vehicle ? "{$this->vehicle->brand_model} — {$this->vehicle->plates}" : $this->vehicle_custom;
+    // ── Accessors ─────────────────────────────────────────────────────────────
+
+    public function getTypeLabelAttribute(): string
+    {
+        return self::TYPE_LABELS[$this->type] ?? $this->type;
     }
-    public function getDriverDisplayAttribute(): ?string {
+
+    public function getStatusLabelAttribute(): string
+    {
+        return self::STATUS_LABELS[$this->status] ?? $this->status;
+    }
+
+    public function getReceptionLabelAttribute(): string
+    {
+        return self::RECEPTION_LABELS[$this->reception_status ?? 'pending'] ?? 'Pendiente';
+    }
+
+    public function getVehicleDisplayAttribute(): ?string
+    {
+        return $this->vehicle
+            ? "{$this->vehicle->brand_model} — {$this->vehicle->plates}"
+            : $this->vehicle_custom;
+    }
+
+    public function getDriverDisplayAttribute(): ?string
+    {
         return $this->personnel ? $this->personnel->full_name : $this->driver_custom;
     }
-    public function getIsCompletedByProviderAttribute(): bool { return $this->completed_by_provider_at !== null; }
-    public function getIsEntryConfirmedAttribute(): bool      { return $this->entry_confirmed_at !== null; }
-    public function getIsReceptionReviewedAttribute(): bool   { return $this->reception_reviewed_at !== null; }
-    public function getIsNoShowAttribute(): bool              { return $this->status === 'no_show'; }
+
+    public function getIsCompletedByProviderAttribute(): bool
+    {
+        return $this->completed_by_provider_at !== null;
+    }
+
+    public function getIsEntryConfirmedAttribute(): bool
+    {
+        return $this->entry_confirmed_at !== null;
+    }
+
+    public function getIsReceptionReviewedAttribute(): bool
+    {
+        return $this->reception_reviewed_at !== null;
+    }
+
+    public function getIsNoShowAttribute(): bool
+    {
+        return $this->status === 'no_show';
+    }
+
+    /**
+     * Calcula la hora de fin sumando duration_minutes a appointment_time.
+     * Devuelve "HH:MM" o null si faltan datos.
+     */
+    public function getEndTimeAttribute(): ?string
+    {
+        if (!$this->appointment_time || !$this->duration_minutes) return null;
+        [$h, $m] = explode(':', substr($this->appointment_time, 0, 5));
+        $totalMins = (int)$h * 60 + (int)$m + $this->duration_minutes;
+        return sprintf('%02d:%02d', intdiv($totalMins, 60), $totalMins % 60);
+    }
+
+    // ── Relaciones ────────────────────────────────────────────────────────────
 
     public function provider(): BelongsTo            { return $this->belongsTo(Provider::class); }
     public function scheduledBy(): BelongsTo         { return $this->belongsTo(User::class, 'scheduled_by'); }
@@ -98,18 +148,27 @@ class Appointment extends Model
     public function unit(): BelongsTo                { return $this->belongsTo(Unit::class); }
     public function items(): HasMany                 { return $this->hasMany(AppointmentItem::class); }
 
-    public function scopeForToday($query) {
+    // ── Scopes ────────────────────────────────────────────────────────────────
+
+    public function scopeForToday($query)
+    {
         return $query->whereDate('appointment_date', today())
             ->whereNotIn('status', ['cancelled']);
     }
-    public function scopeForMonth($query, int $year, int $month) {
+
+    public function scopeForMonth($query, int $year, int $month)
+    {
         return $query->whereYear('appointment_date', $year)
             ->whereMonth('appointment_date', $month);
     }
-    public function scopeForDate($query, string $date) {
+
+    public function scopeForDate($query, string $date)
+    {
         return $query->whereDate('appointment_date', $date);
     }
-    public function scopeDeliveries($query) {
+
+    public function scopeDeliveries($query)
+    {
         return $query->where('type', 'entrega');
     }
 }

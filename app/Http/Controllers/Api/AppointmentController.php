@@ -74,6 +74,7 @@ class AppointmentController extends Controller
             'provider_id'      => 'required|exists:providers,id',
             'appointment_date' => 'required|date',
             'appointment_time' => 'required',
+            'duration_minutes' => 'nullable|integer|min:30|max:480',
             'type'             => 'required|in:entrega,residuos,auditoria,calibracion,servicio',
             'notes'            => 'nullable|string|max:2000',
             'status'           => 'nullable|in:scheduled,confirmed',
@@ -90,6 +91,7 @@ class AppointmentController extends Controller
             'scheduled_by'     => auth()->id(),
             'appointment_date' => $request->appointment_date,
             'appointment_time' => $request->appointment_time,
+            'duration_minutes' => $request->duration_minutes ?? 60,
             'type'             => $request->type,
             'notes'            => $request->notes,
             'products'         => $request->products, // legacy, para compatibilidad
@@ -157,6 +159,7 @@ class AppointmentController extends Controller
             'type'       => 'sometimes|in:entrega,residuos,auditoria,calibracion,servicio',
             'products'   => 'nullable|string|max:1000',
             'notes'      => 'nullable|string|max:1000',
+            'duration_minutes' => 'sometimes|integer|min:30|max:480',
             'status'     => 'sometimes|in:scheduled,confirmed,completed',
             'attachment' => 'nullable|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:10240',
         ]);
@@ -589,6 +592,8 @@ class AppointmentController extends Controller
             'provider'                 => $a->provider ? ['id'=>$a->provider->id,'business_name'=>$a->provider->business_name,'rfc'=>$a->provider->rfc,'provider_type_id'=>$a->provider->provider_type_id] : null,
             'appointment_date'         => $a->appointment_date?->format('Y-m-d'),
             'appointment_time'         => $a->appointment_time,
+            'duration_minutes'         => $a->duration_minutes ?? 60,
+            'end_time'                 => $a->end_time,
             'type'                     => $a->type,
             'type_label'               => $a->type_label,
             'status'                   => $a->status,
@@ -678,14 +683,21 @@ class AppointmentController extends Controller
     }
     private function validateBusinessHours(string $date, string $time, callable $fail): void
     {
-        $carbon = Carbon::parse($date);
-        $hour   = (int) explode(':', $time)[0];
-        if ($carbon->dayOfWeek === Carbon::SUNDAY) { $fail('No se agendan citas los domingos'); return; }
-        if ($carbon->dayOfWeek === Carbon::SATURDAY) {
-            if ($hour < 8 || $hour > 14) $fail('Los sábados el horario es de 8:00 a 14:00');
+        $carbon    = Carbon::parse($date);
+        [$h, $m]   = array_map('intval', explode(':', $time));
+        $totalMins = $h * 60 + $m;
+
+        if ($carbon->dayOfWeek === Carbon::SUNDAY) {
+            $fail('No se agendan citas los domingos');
             return;
         }
-        if ($hour < 8 || $hour > 18) $fail('El horario de lunes a viernes es de 8:00 a 18:00');
+        if ($carbon->dayOfWeek === Carbon::SATURDAY) {
+            if ($totalMins < 8*60 || $totalMins > 14*60)
+                $fail('Los sábados el horario es de 8:00 a 14:00');
+            return;
+        }
+        if ($totalMins < 8*60 || $totalMins > 18*60)
+            $fail('El horario de lunes a viernes es de 8:00 a 18:00');
     }
 
     private function notifyProvider(Appointment $appointment, string $action): void

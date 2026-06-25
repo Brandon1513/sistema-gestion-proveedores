@@ -51,4 +51,19 @@ class ProviderTypeController extends Controller
             'total' => $providerType->documentTypes()->wherePivot('is_required', true)->count(),
         ]);
     }
+    /**
+ * Todos los documentos del tipo de proveedor (para el modal de subida)
+ */
+    public function allDocuments(ProviderType $providerType): JsonResponse
+    {
+        $documents = $providerType->documentTypes()
+            ->orderBy('category')
+            ->orderBy('name')
+            ->get();
+
+        return response()->json([
+            'document_types' => $documents,
+            'total' => $documents->count(),
+        ]);
+    }
 }
