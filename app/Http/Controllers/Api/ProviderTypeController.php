@@ -57,13 +57,27 @@ class ProviderTypeController extends Controller
     public function allDocuments(ProviderType $providerType): JsonResponse
     {
         $documents = $providerType->documentTypes()
+            ->withPivot('is_required')  // ← agregar esto
             ->orderBy('category')
             ->orderBy('name')
-            ->get();
+            ->get()
+            ->map(function ($doc) {
+                return [
+                    'id'              => $doc->id,
+                    'code'            => $doc->code,
+                    'name'            => $doc->name,
+                    'description'     => $doc->description,
+                    'category'        => $doc->category,
+                    'requires_expiry' => $doc->requires_expiry,
+                    'expiry_months'   => $doc->expiry_months,
+                    'allows_multiple' => $doc->allows_multiple,
+                    'pivot'           => ['is_required' => $doc->pivot->is_required],
+                ];
+            });
 
         return response()->json([
             'document_types' => $documents,
-            'total' => $documents->count(),
+            'total'          => $documents->count(),
         ]);
     }
 }
