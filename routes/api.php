@@ -209,7 +209,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // ── Gestión de Tipos de Proveedor (CRUD completo) ─────────────────────────
-    Route::middleware(['role:super_admin,admin,compras'])->group(function () {
+    Route::middleware(['role:super_admin,admin,calidad'])->group(function () {
         Route::post('/provider-types',                                          [ProviderTypeController::class, 'store']);
         Route::put('/provider-types/{providerType}',                            [ProviderTypeController::class, 'update']);
         Route::patch('/provider-types/{providerType}/toggle-active',            [ProviderTypeController::class, 'toggleActive']);
