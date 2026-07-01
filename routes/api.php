@@ -207,6 +207,18 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/document-templates',          [App\Http\Controllers\Api\DocumentTemplateController::class, 'store']);
         Route::delete('/document-templates/{id}',   [App\Http\Controllers\Api\DocumentTemplateController::class, 'destroy']);
     });
+
+    // ── Gestión de Tipos de Proveedor (CRUD completo) ─────────────────────────
+    Route::middleware(['role:super_admin,admin,compras'])->group(function () {
+        Route::post('/provider-types',                                          [ProviderTypeController::class, 'store']);
+        Route::put('/provider-types/{providerType}',                            [ProviderTypeController::class, 'update']);
+        Route::patch('/provider-types/{providerType}/toggle-active',            [ProviderTypeController::class, 'toggleActive']);
+        Route::delete('/provider-types/{providerType}',                         [ProviderTypeController::class, 'destroy']);
+        Route::get('/provider-types/{providerType}/documents',                  [ProviderTypeController::class, 'documents']);
+        Route::post('/provider-types/{providerType}/documents',                 [ProviderTypeController::class, 'assignDocument']);
+        Route::patch('/provider-types/{providerType}/documents/{docId}/toggle-required', [ProviderTypeController::class, 'toggleRequired']);
+        Route::delete('/provider-types/{providerType}/documents/{docId}',       [ProviderTypeController::class, 'removeDocument']);
+    });
     
     // ── Consulta de template por producto (todos los roles autenticados) ──────────
     Route::get('/document-templates/by-product',   [App\Http\Controllers\Api\DocumentTemplateController::class, 'getByProduct']);
@@ -319,5 +331,4 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::get('/providers/{id}/products-services', [ProductsServicesCatalogController::class, 'providerItems']);
-
 });
