@@ -7,6 +7,7 @@ use App\Models\DocumentType;
 use App\Models\ProviderType;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use App\Models\DocumentGroup;
 
@@ -14,78 +15,77 @@ class DocumentTypeController extends Controller
 {
     // ─── Listar todos los tipos de documentos agrupados por tipo de proveedor ──
     public function index(Request $request)
-{
-    $providerTypes = ProviderType::orderBy('name')->get();
- 
-    $result = $providerTypes->map(function ($pt) {
-        // Cargar documentos con sus tipos de proveedor anidados
-        $docs = DocumentType::whereHas('providerTypes', fn($q) => $q->where('provider_types.id', $pt->id))
-            ->with(['providerTypes' => fn($q) => $q->withPivot(['is_required','sort_order','applies_to_existing'])])
-            ->orderBy('sort_order')
+    {
+        $providerTypes = ProviderType::orderBy('name')->get();
+
+        $result = $providerTypes->map(function ($pt) {
+            $docs = DocumentType::whereHas('providerTypes', fn($q) => $q->where('provider_types.id', $pt->id))
+                ->with(['providerTypes' => fn($q) => $q->withPivot(['is_required','sort_order','applies_to_existing'])])
+                ->orderBy('sort_order')
+                ->orderBy('group_name')
+                ->orderBy('name')
+                ->get()
+                ->map(function ($doc) use ($pt) {
+                    $pivot = $doc->providerTypes->firstWhere('id', $pt->id)?->pivot;
+                    return [
+                        'id'                  => $doc->id,
+                        'code'                => $doc->code,
+                        'name'                => $doc->name,
+                        'description'         => $doc->description,
+                        'category'            => $doc->category,
+                        'group_name'          => $doc->group_name,
+                        'sort_order'          => $doc->sort_order,
+                        'is_active'           => $doc->is_active,
+                        'requires_expiry'     => $doc->requires_expiry,
+                        'expiry_alert_days'   => $doc->expiry_alert_days,
+                        'allows_multiple'     => $doc->allows_multiple,
+                        'allowed_extensions'  => $doc->allowed_extensions,
+                        'max_file_size_mb'    => $doc->max_file_size_mb,
+                        'is_required'         => $pivot?->is_required ?? false,
+                        'pivot_sort_order'    => $pivot?->sort_order ?? 0,
+                        'applies_to_existing' => $pivot?->applies_to_existing ?? true,
+                        'expiry_months'       => $doc->expiry_months,
+                        'provider_types'      => $doc->providerTypes->map(fn($ptype) => [
+                            'id'   => $ptype->id,
+                            'name' => $ptype->name,
+                            'pivot' => [
+                                'is_required'         => $ptype->pivot->is_required,
+                                'sort_order'          => $ptype->pivot->sort_order,
+                                'applies_to_existing' => $ptype->pivot->applies_to_existing,
+                            ],
+                        ])->values()->toArray(),
+                    ];
+                });
+
+            return [
+                'provider_type'   => $pt,
+                'documents'       => $docs,
+                'documents_count' => $docs->count(),
+            ];
+        });
+
+        $unassigned = DocumentType::whereDoesntHave('providerTypes')
+            ->with('providerTypes')
             ->orderBy('group_name')
+            ->orderBy('sort_order')
             ->orderBy('name')
             ->get()
-            ->map(function ($doc) use ($pt) {
-                // Encontrar el pivot específico de este tipo de proveedor
-                $pivot = $doc->providerTypes->firstWhere('id', $pt->id)?->pivot;
-                return [
-                    'id'                  => $doc->id,
-                    'code'                => $doc->code,
-                    'name'                => $doc->name,
-                    'description'         => $doc->description,
-                    'category'            => $doc->category,
-                    'group_name'          => $doc->group_name,
-                    'sort_order'          => $doc->sort_order,
-                    'is_active'           => $doc->is_active,
-                    'requires_expiry'     => $doc->requires_expiry,
-                    'expiry_alert_days'   => $doc->expiry_alert_days,
-                    'allows_multiple'     => $doc->allows_multiple,
-                    'allowed_extensions'  => $doc->allowed_extensions,
-                    'max_file_size_mb'    => $doc->max_file_size_mb,
-                    // Datos del pivot para esta relación específica
-                    'is_required'         => $pivot?->is_required ?? false,
-                    'pivot_sort_order'    => $pivot?->sort_order ?? 0,
-                    'applies_to_existing' => $pivot?->applies_to_existing ?? true,
-                    'expiry_months'      => $doc->expiry_months,
-                    // ✅ Array completo de provider_types para que el modal
-                    //    pueda preseleccionar los checkboxes correctamente
-                    'provider_types'      => $doc->providerTypes->map(fn($ptype) => [
-                        'id'   => $ptype->id,
-                        'name' => $ptype->name,
-                        'pivot' => [
-                            'is_required'         => $ptype->pivot->is_required,
-                            'sort_order'          => $ptype->pivot->sort_order,
-                            'applies_to_existing' => $ptype->pivot->applies_to_existing,
-                        ],
-                    ])->values()->toArray(),
-                ];
-            });
- 
-        return [
-            'provider_type'   => $pt,
-            'documents'       => $docs,
-            'documents_count' => $docs->count(),
-        ];
-    });
- 
-    // Documentos sin asignar
-    $unassigned = DocumentType::whereDoesntHave('providerTypes')
-        ->with('providerTypes')
-        ->orderBy('group_name')
-        ->orderBy('sort_order')
-        ->orderBy('name')
-        ->get()
-        ->map(fn($doc) => array_merge($doc->toArray(), ['provider_types' => []]));
- 
-    return response()->json([
-        'provider_types' => $result,
-        'unassigned'     => $unassigned,
-    ]);
-}
+            ->map(fn($doc) => array_merge($doc->toArray(), ['provider_types' => []]));
+
+        return response()->json([
+            'provider_types' => $result,
+            'unassigned'     => $unassigned,
+        ]);
+    }
 
     // ─── Crear nuevo tipo de documento ───────────────────────────────────────
     public function store(Request $request)
     {
+        // ✅ Convertir string vacío a null antes de validar
+        if ($request->has('code') && trim((string) $request->code) === '') {
+            $request->merge(['code' => null]);
+        }
+
         $validated = $request->validate([
             'name'                => 'required|string|max:255',
             'code'                => 'nullable|string|max:50|unique:document_types,code',
@@ -97,19 +97,29 @@ class DocumentTypeController extends Controller
             'allows_multiple'     => 'boolean',
             'allowed_extensions'  => 'nullable',
             'max_file_size_mb'    => 'nullable|integer|min:1|max:100',
-            // Asignación a tipos de proveedor
             'provider_type_ids'   => 'nullable|array',
             'provider_type_ids.*' => 'exists:provider_types,id',
-            'is_required_map'     => 'nullable|array',   // { provider_type_id: bool }
+            'is_required_map'     => 'nullable|array',
             'applies_to_existing' => 'boolean',
-            'expiry_months' => 'nullable|integer|min:1|max:120',
+            'expiry_months'       => 'nullable|integer|min:1|max:120',
         ]);
+
+        // ✅ Auto-generar código único si no viene
+        if (empty($validated['code'])) {
+            $base = Str::slug($validated['name'], '_') ?: 'doc';
+            $code = $base;
+            $i    = 1;
+            while (DocumentType::where('code', $code)->exists()) {
+                $code = $base . '_' . $i++;
+            }
+            $validated['code'] = $code;
+        }
 
         DB::beginTransaction();
         try {
             $doc = DocumentType::create([
                 'name'               => $validated['name'],
-                'code'               => $validated['code'] ?? null,
+                'code'               => $validated['code'],
                 'description'        => $validated['description'] ?? null,
                 'category'           => $validated['category'],
                 'group_name'         => $validated['group_name'] ?? null,
@@ -117,23 +127,22 @@ class DocumentTypeController extends Controller
                 'expiry_alert_days'  => $validated['expiry_alert_days'] ?? 30,
                 'allows_multiple'    => $validated['allows_multiple'] ?? false,
                 'allowed_extensions' => is_array($validated['allowed_extensions'] ?? null)
-                ? implode(',', $validated['allowed_extensions'])
-                : ($validated['allowed_extensions'] ?? null),
+                    ? implode(',', $validated['allowed_extensions'])
+                    : ($validated['allowed_extensions'] ?? null),
                 'max_file_size_mb'   => $validated['max_file_size_mb'] ?? 10,
                 'is_active'          => true,
                 'is_required'        => false,
-                'expiry_months' => $validated['expiry_months'] ?? null,
+                'expiry_months'      => $validated['expiry_months'] ?? null,
             ]);
 
-            // Asignar a tipos de proveedor
             if (!empty($validated['provider_type_ids'])) {
                 $pivotData = [];
                 foreach ($validated['provider_type_ids'] as $ptId) {
                     $isReq = $validated['is_required_map'][$ptId] ?? false;
                     $pivotData[$ptId] = [
-                        'is_required'        => $isReq,
-                        'sort_order'         => 0,
-                        'applies_to_existing'=> $validated['applies_to_existing'] ?? true,
+                        'is_required'         => $isReq,
+                        'sort_order'          => 0,
+                        'applies_to_existing' => $validated['applies_to_existing'] ?? true,
                     ];
                 }
                 $doc->providerTypes()->sync($pivotData);
@@ -146,7 +155,7 @@ class DocumentTypeController extends Controller
             ], 201);
         } catch (\Throwable $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Error al crear: '.$e->getMessage()], 500);
+            return response()->json(['message' => 'Error al crear: ' . $e->getMessage()], 500);
         }
     }
 
@@ -155,9 +164,14 @@ class DocumentTypeController extends Controller
     {
         $doc = DocumentType::findOrFail($id);
 
+        // ✅ Convertir string vacío a null antes de validar
+        if ($request->has('code') && trim((string) $request->code) === '') {
+            $request->merge(['code' => null]);
+        }
+
         $validated = $request->validate([
             'name'                => 'required|string|max:255',
-            'code'                => ['nullable','string','max:50', Rule::unique('document_types','code')->ignore($id)],
+            'code'                => ['nullable', 'string', 'max:50', Rule::unique('document_types', 'code')->ignore($id)],
             'description'         => 'nullable|string|max:1000',
             'category'            => ['required', Rule::in(['fiscal', 'tecnico', 'legal', 'otro'])],
             'group_name'          => 'nullable|string|max:100',
@@ -171,14 +185,25 @@ class DocumentTypeController extends Controller
             'provider_type_ids.*' => 'exists:provider_types,id',
             'is_required_map'     => 'nullable|array',
             'applies_to_existing' => 'boolean',
-            'expiry_months' => 'nullable|integer|min:1|max:120',
+            'expiry_months'       => 'nullable|integer|min:1|max:120',
         ]);
+
+        // ✅ Auto-generar código único si no viene (al actualizar)
+        if (empty($validated['code'])) {
+            $base = Str::slug($validated['name'], '_') ?: 'doc';
+            $code = $base;
+            $i    = 1;
+            while (DocumentType::where('code', $code)->where('id', '!=', $id)->exists()) {
+                $code = $base . '_' . $i++;
+            }
+            $validated['code'] = $code;
+        }
 
         DB::beginTransaction();
         try {
             $doc->update([
                 'name'               => $validated['name'],
-                'code'               => $validated['code'] ?? null,
+                'code'               => $validated['code'],
                 'description'        => $validated['description'] ?? null,
                 'category'           => $validated['category'],
                 'group_name'         => $validated['group_name'] ?? null,
@@ -186,18 +211,17 @@ class DocumentTypeController extends Controller
                 'expiry_alert_days'  => $validated['expiry_alert_days'] ?? 30,
                 'allows_multiple'    => $validated['allows_multiple'] ?? false,
                 'allowed_extensions' => is_array($validated['allowed_extensions'] ?? null)
-                ? implode(',', $validated['allowed_extensions'])
-                : ($validated['allowed_extensions'] ?? null),
+                    ? implode(',', $validated['allowed_extensions'])
+                    : ($validated['allowed_extensions'] ?? null),
                 'max_file_size_mb'   => $validated['max_file_size_mb'] ?? 10,
                 'is_active'          => $validated['is_active'] ?? true,
-                'expiry_months' => $validated['expiry_months'] ?? null,
+                'expiry_months'      => $validated['expiry_months'] ?? null,
             ]);
 
             if (isset($validated['provider_type_ids'])) {
                 $pivotData = [];
                 foreach ($validated['provider_type_ids'] as $ptId) {
-                    $isReq = $validated['is_required_map'][$ptId] ?? false;
-                    // Conservar sort_order actual si ya existe
+                    $isReq    = $validated['is_required_map'][$ptId] ?? false;
                     $existing = DB::table('document_type_provider_type')
                         ->where('document_type_id', $id)
                         ->where('provider_type_id', $ptId)
@@ -218,7 +242,7 @@ class DocumentTypeController extends Controller
             ]);
         } catch (\Throwable $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Error al actualizar: '.$e->getMessage()], 500);
+            return response()->json(['message' => 'Error al actualizar: ' . $e->getMessage()], 500);
         }
     }
 
@@ -254,7 +278,7 @@ class DocumentTypeController extends Controller
             return response()->json(['message' => 'Orden actualizado correctamente']);
         } catch (\Throwable $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Error al reordenar: '.$e->getMessage()], 500);
+            return response()->json(['message' => 'Error al reordenar: ' . $e->getMessage()], 500);
         }
     }
 
@@ -280,81 +304,74 @@ class DocumentTypeController extends Controller
         return response()->json(['provider_types' => $types]);
     }
 
-    // ─── Listar grupos ────────────────────────────────────────────────────────────
-public function getGroups()
-{
-    $groups = DocumentGroup::orderBy('sort_order')->orderBy('name')->get();
-    return response()->json(['groups' => $groups]);
-}
- 
-// ─── Crear grupo ──────────────────────────────────────────────────────────────
-public function storeGroup(Request $request)
-{
-    $validated = $request->validate([
-        'name'       => 'required|string|max:100|unique:document_groups,name',
-        'sort_order' => 'nullable|integer|min:0',
-    ]);
- 
-    $group = DocumentGroup::create([
-        'name'       => $validated['name'],
-        'sort_order' => $validated['sort_order'] ?? DocumentGroup::max('sort_order') + 1,
-        'is_active'  => true,
-    ]);
- 
-    return response()->json(['message' => 'Grupo creado correctamente', 'group' => $group], 201);
-}
- 
-// ─── Actualizar grupo ─────────────────────────────────────────────────────────
-public function updateGroup(Request $request, $id)
-{
-    $group = DocumentGroup::findOrFail($id);
- 
-    $validated = $request->validate([
-        'name'      => ['required','string','max:100', \Illuminate\Validation\Rule::unique('document_groups','name')->ignore($id)],
-        'is_active' => 'boolean',
-    ]);
- 
-    // Si se desactiva el grupo, limpiar group_name de los documentos que lo usan
-    if (isset($validated['is_active']) && !$validated['is_active'] && $group->is_active) {
+    // ─── Listar grupos ────────────────────────────────────────────────────────
+    public function getGroups()
+    {
+        $groups = DocumentGroup::orderBy('sort_order')->orderBy('name')->get();
+        return response()->json(['groups' => $groups]);
+    }
+
+    // ─── Crear grupo ──────────────────────────────────────────────────────────
+    public function storeGroup(Request $request)
+    {
+        $validated = $request->validate([
+            'name'       => 'required|string|max:100|unique:document_groups,name',
+            'sort_order' => 'nullable|integer|min:0',
+        ]);
+
+        $group = DocumentGroup::create([
+            'name'       => $validated['name'],
+            'sort_order' => $validated['sort_order'] ?? DocumentGroup::max('sort_order') + 1,
+            'is_active'  => true,
+        ]);
+
+        return response()->json(['message' => 'Grupo creado correctamente', 'group' => $group], 201);
+    }
+
+    // ─── Actualizar grupo ─────────────────────────────────────────────────────
+    public function updateGroup(Request $request, $id)
+    {
+        $group = DocumentGroup::findOrFail($id);
+
+        $validated = $request->validate([
+            'name'      => ['required', 'string', 'max:100', Rule::unique('document_groups', 'name')->ignore($id)],
+            'is_active' => 'boolean',
+        ]);
+
+        if (isset($validated['is_active']) && !$validated['is_active'] && $group->is_active) {
+            DocumentType::where('group_name', $group->name)->update(['group_name' => null]);
+        }
+
+        if ($validated['name'] !== $group->name) {
+            DocumentType::where('group_name', $group->name)->update(['group_name' => $validated['name']]);
+        }
+
+        $group->update($validated);
+
+        return response()->json(['message' => 'Grupo actualizado correctamente', 'group' => $group]);
+    }
+
+    // ─── Eliminar grupo ───────────────────────────────────────────────────────
+    public function destroyGroup($id)
+    {
+        $group = DocumentGroup::findOrFail($id);
         DocumentType::where('group_name', $group->name)->update(['group_name' => null]);
+        $group->delete();
+        return response()->json(['message' => 'Grupo eliminado correctamente']);
     }
- 
-    // Si se renombra, actualizar también los documentos que lo usan
-    if ($validated['name'] !== $group->name) {
-        DocumentType::where('group_name', $group->name)->update(['group_name' => $validated['name']]);
+
+    // ─── Reordenar grupos ─────────────────────────────────────────────────────
+    public function reorderGroups(Request $request)
+    {
+        $validated = $request->validate([
+            'ordered_ids'   => 'required|array',
+            'ordered_ids.*' => 'integer|exists:document_groups,id',
+        ]);
+
+        foreach ($validated['ordered_ids'] as $index => $groupId) {
+            DocumentGroup::where('id', $groupId)->update(['sort_order' => $index]);
+        }
+
+        return response()->json(['message' => 'Orden de grupos actualizado']);
     }
- 
-    $group->update($validated);
- 
-    return response()->json(['message' => 'Grupo actualizado correctamente', 'group' => $group]);
-}
- 
-// ─── Eliminar grupo ───────────────────────────────────────────────────────────
-public function destroyGroup($id)
-{
-    $group = DocumentGroup::findOrFail($id);
- 
-    // Limpiar referencias en documentos
-    DocumentType::where('group_name', $group->name)->update(['group_name' => null]);
- 
-    $group->delete();
- 
-    return response()->json(['message' => 'Grupo eliminado correctamente']);
-}
- 
-// ─── Reordenar grupos ─────────────────────────────────────────────────────────
-public function reorderGroups(Request $request)
-{
-    $validated = $request->validate([
-        'ordered_ids'   => 'required|array',
-        'ordered_ids.*' => 'integer|exists:document_groups,id',
-    ]);
- 
-    foreach ($validated['ordered_ids'] as $index => $groupId) {
-        DocumentGroup::where('id', $groupId)->update(['sort_order' => $index]);
-    }
- 
-    return response()->json(['message' => 'Orden de grupos actualizado']);
-}
- 
 }
