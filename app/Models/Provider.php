@@ -37,6 +37,7 @@ class Provider extends Model
         'status',
         'observations',
         'created_by',
+        'tipo_persona',  
     ];
 
     protected $casts = [

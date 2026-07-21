@@ -110,13 +110,22 @@ class ProviderDashboardController extends Controller
 
         // ── Todos los tipos de documento asignados a este tipo de proveedor ──
         // withPivot para leer is_required desde la tabla pivot
+        //Además filtramos por tipo de persona (moral/fisica) según el campo provider.tipo_persona
         $docTypes = DocumentType::whereHas('providerTypes', function ($q) use ($provider) {
-                $q->where('provider_type_id', $provider->provider_type_id);
-            })
-            ->with(['providerTypes' => function ($q) use ($provider) {
-                $q->where('provider_type_id', $provider->provider_type_id);
-            }])
-            ->get();
+        $q->where('provider_type_id', $provider->provider_type_id);
+    })
+    ->with(['providerTypes' => function ($q) use ($provider) {
+        $q->where('provider_type_id', $provider->provider_type_id)
+          ->withPivot(['is_required', 'applies_to_persona']);
+    }])
+    ->get()
+    ->filter(function ($docType) use ($provider) {
+        $pivot   = $docType->providerTypes->first()?->pivot;
+        $applies = $pivot?->applies_to_persona ?? 'all';
+        if ($applies === 'all') return true;
+        return $applies === ($provider->tipo_persona ?? 'moral');
+    })
+    ->values();
 
         // ── Todos los documentos cargados por el proveedor (sin filtrar status) ──
         $allUploaded = ProviderDocument::with('documentType')
@@ -131,8 +140,8 @@ class ProviderDashboardController extends Controller
         // ── Mapear cada tipo de documento ────────────────────────────────────
         $documentsWithStatus = $docTypes->map(function ($docType) use ($groupedByType, $provider) {
             // is_required viene del pivot, no del campo global
-            $pivotIsRequired = (bool) optional($docType->providerTypes->first())->pivot->is_required;
-
+            $pivot           = $docType->providerTypes->first()?->pivot;
+            $pivotIsRequired = (bool) ($pivot?->is_required ?? false);
             $docsOfThisType = $groupedByType->get($docType->id, collect());
 
             if ($docType->allows_multiple) {

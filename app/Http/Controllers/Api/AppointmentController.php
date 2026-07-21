@@ -4,17 +4,18 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Appointment;
+use App\Models\AppointmentItem;
+use App\Models\ProductService;
 use App\Models\Provider;
+use App\Models\Unit;
 use App\Models\User;
+use App\Services\NotificationDispatcher;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
-use Carbon\Carbon;
-use App\Models\Unit;
-use App\Models\AppointmentItem;
-use App\Models\ProductService;
 
 class AppointmentController extends Controller
 {
@@ -49,6 +50,7 @@ class AppointmentController extends Controller
             'personnel:id,full_name,position',
             'entryConfirmedBy:id,name',
             'receptionReviewedBy:id,name',
+            'rescheduledFrom:id,appointment_date,appointment_time', // ✅ nuevo
         ]);
 
         if ($request->filled('year') && $request->filled('month'))
@@ -78,6 +80,7 @@ class AppointmentController extends Controller
             'type'             => 'required|in:entrega,residuos,auditoria,calibracion,servicio',
             'notes'            => 'nullable|string|max:2000',
             'status'           => 'nullable|in:scheduled,confirmed',
+            'rescheduled_from_id' => 'nullable|exists:appointments,id', // ✅ nuevo
             // Items (múltiples productos)
             'items'            => 'nullable|array',
             'items.*.product_service_id' => 'required|exists:products_services,id',
@@ -85,18 +88,51 @@ class AppointmentController extends Controller
             'items.*.unit_id'            => 'nullable|exists:units,id',
             'items.*.notes'              => 'nullable|string|max:500',
         ]);
+
+        // ✅ Si viene rescheduled_from_id, evitar que la misma cita origen
+        // se reagende dos veces (ya generó una cita nueva anteriormente).
+        if ($request->filled('rescheduled_from_id')) {
+            $origin = \App\Models\Appointment::find($request->rescheduled_from_id);
+            if ($origin && $origin->rescheduled_to_id) {
+                return response()->json([
+                    'message' => 'Esta cita ya fue reagendada anteriormente',
+                ], 422);
+            }
+        }
  
         $appointment = \App\Models\Appointment::create([
-            'provider_id'      => $request->provider_id,
-            'scheduled_by'     => auth()->id(),
-            'appointment_date' => $request->appointment_date,
-            'appointment_time' => $request->appointment_time,
-            'duration_minutes' => $request->duration_minutes ?? 60,
-            'type'             => $request->type,
-            'notes'            => $request->notes,
-            'products'         => $request->products, // legacy, para compatibilidad
-            'status'           => $request->status ?? 'scheduled',
+            'provider_id'         => $request->provider_id,
+            'scheduled_by'        => auth()->id(),
+            'appointment_date'    => $request->appointment_date,
+            'appointment_time'    => $request->appointment_time,
+            'duration_minutes'    => $request->duration_minutes ?? 60,
+            'type'                => $request->type,
+            'notes'               => $request->notes,
+            'products'            => $request->products, // legacy, para compatibilidad
+            'status'              => $request->status ?? 'scheduled',
+            'rescheduled_from_id' => $request->rescheduled_from_id ?? null, // ✅ nuevo
         ]);
+
+        // ✅ Cerrar el ciclo: marcar la cita origen como ya reagendada
+        if ($request->filled('rescheduled_from_id')) {
+        \App\Models\Appointment::where('id', $request->rescheduled_from_id)
+            ->update(['rescheduled_to_id' => $appointment->id]);
+    
+        // ✅ NUEVO: notificar el reagendado
+        $appointment->load('provider:id,business_name');
+        NotificationDispatcher::notifyRoles(
+            ['seguridad', 'ingeniero_alimentos', 'compras', 'admin', 'super_admin'],
+            auth()->id(),
+            'appointment_rescheduled',
+            'Cita reagendada',
+            "{$appointment->provider->business_name} fue reagendada para " .
+                Carbon::parse($appointment->appointment_date)->locale('es')->isoFormat('D [de] MMMM') .
+                " a las " . substr($appointment->appointment_time, 0, 5) . " hrs",
+            ['appointment_id' => $appointment->id, 'link' => '/appointments']
+        );
+    }
+
+
  
         // Guardar adjunto si viene
         if ($request->hasFile('attachment')) {
@@ -123,7 +159,7 @@ class AppointmentController extends Controller
  
         return response()->json([
             'message'     => 'Cita agendada correctamente',
-            'appointment' => $this->formatAppointment($appointment->fresh(['provider', 'items.productService', 'items.unit'])),
+            'appointment' => $this->formatAppointment($appointment->fresh(['provider', 'items.productService', 'items.unit', 'rescheduledFrom'])),
         ], 201);
     }
 
@@ -138,6 +174,7 @@ class AppointmentController extends Controller
             'cancelledBy:id,name',
             'entryConfirmedBy:id,name',
             'receptionReviewedBy:id,name',
+            'rescheduledFrom:id,appointment_date,appointment_time', // ✅ nuevo
         ]);
         return response()->json(['appointment' => $this->formatAppointment($appointment)]);
     }
@@ -187,7 +224,7 @@ class AppointmentController extends Controller
             }
         }
 
-        return response()->json(['message'=>'Cita actualizada','appointment'=>$this->formatAppointment($appointment->fresh(['provider','scheduledBy','vehicle','personnel','items']))]);
+        return response()->json(['message'=>'Cita actualizada','appointment'=>$this->formatAppointment($appointment->fresh(['provider','scheduledBy','vehicle','personnel','items','rescheduledFrom']))]);
     }
 
     public function cancel(Request $request, Appointment $appointment): JsonResponse
@@ -372,24 +409,37 @@ class AppointmentController extends Controller
         }
 
         $appointment->update([
-            'entry_confirmed_at'   => now(),
-            'entry_confirmed_by'   => auth()->id(),
-            'entry_notes'          => $request->entry_notes ?? null,
-            'actual_arrival_time'  => $request->actual_arrival_time,
-            'arrived_on_time'      => $arrivedOnTime,
-            'delay_minutes'        => $delayMinutes > 0 ? $delayMinutes : null,
-            'physical_docs_status' => $physicalDocsStatus ?: null,
-            'has_missing_docs'     => $hasMissingDocs,
-            'status'               => 'confirmed',
-        ]);
+        'entry_confirmed_at'   => now(),
+        'entry_confirmed_by'   => auth()->id(),
+        'entry_notes'          => $request->entry_notes ?? null,
+        'actual_arrival_time'  => $request->actual_arrival_time,
+        'arrived_on_time'      => $arrivedOnTime,
+        'delay_minutes'        => $delayMinutes > 0 ? $delayMinutes : null,
+        'physical_docs_status' => $physicalDocsStatus ?: null,
+        'has_missing_docs'     => $hasMissingDocs,
+        'status'               => 'confirmed',
+    ]);
+    
+    // ✅ NUEVO: notificar que el proveedor llegó
+    NotificationDispatcher::notifyRoles(
+        ['ingeniero_alimentos', 'compras', 'admin', 'super_admin'],
+        auth()->id(),
+        'appointment_entry_confirmed',
+        'Proveedor llegó',
+        "{$appointment->provider->business_name} llegó a su cita de las " .
+            substr($appointment->appointment_time, 0, 5) . " hrs" .
+            ($hasMissingDocs ? ' (con documentos faltantes)' : ''),
+        ['appointment_id' => $appointment->id, 'link' => '/food-engineer']
+    );
+    
+    return response()->json([
+        'message'          => 'Entrada confirmada correctamente',
+        'arrived_on_time'  => $arrivedOnTime,
+        'delay_minutes'    => $delayMinutes > 0 ? $delayMinutes : null,
+        'has_missing_docs' => $hasMissingDocs,
+        'appointment'      => $this->formatAppointment($appointment->fresh(['provider.providerType','vehicle','personnel','entryConfirmedBy'])),
+    ]);
 
-        return response()->json([
-            'message'          => 'Entrada confirmada correctamente',
-            'arrived_on_time'  => $arrivedOnTime,
-            'delay_minutes'    => $delayMinutes > 0 ? $delayMinutes : null,
-            'has_missing_docs' => $hasMissingDocs,
-            'appointment'      => $this->formatAppointment($appointment->fresh(['provider.providerType','vehicle','personnel','entryConfirmedBy'])),
-        ]);
     }
 
     // ── Ingeniero de Alimentos ────────────────────────────────────────────────
@@ -502,30 +552,62 @@ class AppointmentController extends Controller
     public function registerReception(Request $request, $appointmentId): JsonResponse
     {
         $appointment = \App\Models\Appointment::with('items')->findOrFail($appointmentId);
- 
+
         if ($appointment->type !== 'entrega') {
             return response()->json(['message' => 'Solo se pueden registrar recepciones para entregas'], 422);
         }
- 
+
+        // ✅ Normalizar antes de validar: not_delivered a bool real, y limpiar
+        // cantidad/unidad cuando el ítem viene marcado como no entregado, para
+        // evitar el problema de casting de PostgreSQL con strings vacíos.
+        $items = collect($request->input('items', []))->map(function ($item) {
+            $item['not_delivered'] = filter_var($item['not_delivered'] ?? false, FILTER_VALIDATE_BOOLEAN);
+            if ($item['not_delivered']) {
+                $item['quantity_received'] = null;
+                $item['received_unit_id']  = null;
+                $item['quantity_rejected'] = null;
+                $item['rejection_reason']  = null;
+            }
+            return $item;
+        })->toArray();
+        $request->merge(['items' => $items]);
+
         $request->validate([
             'reception_notes' => 'nullable|string|max:2000',
             'items'           => 'required|array|min:1',
             'items.*.id'      => 'required|exists:appointment_items,id',
-            'items.*.quantity_received'  => 'required|numeric|min:0',
-            'items.*.received_unit_id'   => 'required|exists:units,id',
+            'items.*.not_delivered'      => 'nullable|boolean',
+            'items.*.quantity_received'  => 'required_if:items.*.not_delivered,false|nullable|numeric|min:0',
+            'items.*.received_unit_id'   => 'required_if:items.*.not_delivered,false|nullable|exists:units,id',
             'items.*.quantity_rejected'  => 'nullable|numeric|min:0',
             'items.*.rejection_reason'   => 'nullable|in:inocuidad,calidad',
             'items.*.reception_notes'    => 'nullable|string|max:500',
         ], [
-            'items.required'                    => 'Debes registrar al menos un ítem',
-            'items.*.quantity_received.required' => 'La cantidad recibida es requerida',
-            'items.*.received_unit_id.required'  => 'La unidad es requerida',
+            'items.required'                        => 'Debes registrar al menos un ítem',
+            'items.*.quantity_received.required_if' => 'La cantidad recibida es requerida',
+            'items.*.received_unit_id.required_if'  => 'La unidad es requerida',
         ]);
- 
+
         foreach ($request->items as $itemData) {
             $item = AppointmentItem::find($itemData['id']);
             if (!$item || $item->appointment_id !== $appointment->id) continue;
- 
+
+            $notDelivered = filter_var($itemData['not_delivered'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+            // ✅ Ítem no entregado: se guarda como estado propio, sin cantidades
+            if ($notDelivered) {
+                $item->update([
+                    'not_delivered'      => true,
+                    'quantity_received'  => null,
+                    'quantity_rejected'  => null,
+                    'received_unit_id'   => null,
+                    'reception_status'   => 'not_delivered',
+                    'rejection_reason'   => null,
+                    'reception_notes'    => $itemData['reception_notes'] ?? null,
+                ]);
+                continue;
+            }
+
             $qtyRec = (float) $itemData['quantity_received'];
             $qtyRej = (float) ($itemData['quantity_rejected'] ?? 0);
  
@@ -539,6 +621,7 @@ class AppointmentController extends Controller
             }
  
             $item->update([
+                'not_delivered'      => false,
                 'quantity_received'  => $qtyRec,
                 'quantity_rejected'  => $qtyRej > 0 ? $qtyRej : null,
                 'received_unit_id'   => $itemData['received_unit_id'],
@@ -550,17 +633,25 @@ class AppointmentController extends Controller
  
         // Estado global de la recepción basado en los ítems
         $appointment->refresh();
-        $allStatuses   = $appointment->items->pluck('reception_status');
-        $hasRejected   = $allStatuses->contains('rejected');
-        $hasPartial    = $allStatuses->contains('partial');
-        $allAccepted   = $allStatuses->every(fn($s) => $s === 'accepted');
-        $allRejected   = $allStatuses->every(fn($s) => $s === 'rejected');
- 
-        $globalStatus = match(true) {
-            $allAccepted  => 'accepted',
-            $allRejected  => 'rejected',
-            default       => 'partial',
-        };
+        $allStatuses = $appointment->items->pluck('reception_status');
+
+        // ✅ Los ítems "no entregados" se excluyen del cálculo de aceptado/rechazado total,
+        // pero si TODOS los ítems no llegaron, el estado global también es 'not_delivered'.
+        $deliveredStatuses = $allStatuses->reject(fn($s) => $s === 'not_delivered');
+
+        if ($deliveredStatuses->isEmpty()) {
+            $globalStatus = 'not_delivered';
+        } else {
+            $hasNotDelivered = $allStatuses->contains('not_delivered');
+            $allAccepted     = $deliveredStatuses->every(fn($s) => $s === 'accepted');
+            $allRejected      = $deliveredStatuses->every(fn($s) => $s === 'rejected');
+
+            $globalStatus = match(true) {
+                $allAccepted && !$hasNotDelivered => 'accepted',
+                $allRejected && !$hasNotDelivered => 'rejected',
+                default                            => 'partial',
+            };
+        }
  
         $appointment->update([
             'reception_status'      => $globalStatus,
@@ -620,6 +711,15 @@ class AppointmentController extends Controller
             'is_no_show'               => $a->is_no_show,
             'no_show_at'               => $a->no_show_at?->format('H:i'),
             'no_show_notes'            => $a->no_show_notes,
+            // ✅ Reagendado
+            'rescheduled_from_id'      => $a->rescheduled_from_id,
+            'rescheduled_to_id'        => $a->rescheduled_to_id,
+            'is_rescheduled'           => (bool) $a->rescheduled_to_id,
+            'rescheduled_from'         => $a->relationLoaded('rescheduledFrom') && $a->rescheduledFrom ? [
+                'id'               => $a->rescheduledFrom->id,
+                'appointment_date' => $a->rescheduledFrom->appointment_date?->format('Y-m-d'),
+                'appointment_time' => $a->rescheduledFrom->appointment_time,
+            ] : null,
             // Recepción (legacy — un solo producto)
             'reception_status'         => $a->reception_status ?? 'pending',
             'reception_label'          => $a->reception_label,
@@ -641,6 +741,7 @@ class AppointmentController extends Controller
                 'quantity_expected'     => $item->quantity_expected,
                 'unit'                  => $item->unit ? ['id'=>$item->unit->id,'abbreviation'=>$item->unit->abbreviation,'name'=>$item->unit->name] : null,
                 'notes'                 => $item->notes,
+                'not_delivered'         => (bool) $item->not_delivered,
                 'quantity_received'     => $item->quantity_received,
                 'quantity_rejected'     => $item->quantity_rejected,
                 'quantity_accepted'     => $item->quantity_accepted,
@@ -670,16 +771,29 @@ class AppointmentController extends Controller
         ]);
  
         $appointment->update([
-            'status'                => 'no_show',
-            'no_show_at'            => now(),
-            'no_show_registered_by' => auth()->id(),
-            'no_show_notes'         => $request->no_show_notes ?? null,
-        ]);
- 
-        return response()->json([
-            'message'     => 'Registrado como no presentado',
-            'appointment' => $this->formatAppointment($appointment->fresh(['provider'])),
-        ]);
+        'status'                => 'no_show',
+        'no_show_at'            => now(),
+        'no_show_registered_by' => auth()->id(),
+        'no_show_notes'         => $request->no_show_notes ?? null,
+    ]);
+    
+    // ✅ NUEVO: notificar que el proveedor no se presentó
+    $appointment->load('provider:id,business_name');
+    NotificationDispatcher::notifyRoles(
+        ['compras', 'ingeniero_alimentos', 'admin', 'super_admin'],
+        auth()->id(),
+        'appointment_no_show',
+        'Proveedor no se presentó',
+        "{$appointment->provider->business_name} no llegó a su cita de las " .
+            substr($appointment->appointment_time, 0, 5) . " hrs",
+        ['appointment_id' => $appointment->id, 'link' => '/appointments']
+    );
+    
+    return response()->json([
+        'message'     => 'Registrado como no presentado',
+        'appointment' => $this->formatAppointment($appointment->fresh(['provider'])),
+    ]);
+
     }
     private function validateBusinessHours(string $date, string $time, callable $fail): void
     {

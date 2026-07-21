@@ -27,6 +27,8 @@ class Appointment extends Model
         'reception_reviewed_by', 'reception_reviewed_at',
         'quantity_received', 'quantity_rejected', 'unit_id',
         'rejection_reason', 'is_partial_rejection',
+        'rescheduled_from_id',
+        'rescheduled_to_id',
     ];
 
     protected $casts = [
@@ -76,6 +78,15 @@ class Appointment extends Model
 
     // ── Accessors ─────────────────────────────────────────────────────────────
 
+    public function rescheduledFrom(): BelongsTo
+    {
+        return $this->belongsTo(Appointment::class, 'rescheduled_from_id');
+    }
+
+    public function rescheduledTo(): BelongsTo
+    {
+        return $this->belongsTo(Appointment::class, 'rescheduled_to_id');
+    }
     public function getTypeLabelAttribute(): string
     {
         return self::TYPE_LABELS[$this->type] ?? $this->type;

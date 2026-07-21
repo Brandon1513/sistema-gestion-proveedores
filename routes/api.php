@@ -2,12 +2,14 @@
 
 use App\Http\Controllers\Api\AppointmentController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\CalendarBlockController;
 use App\Http\Controllers\Api\CatalogImportController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\DocumentStatusController;
 use App\Http\Controllers\Api\DocumentTemplateController;
 use App\Http\Controllers\Api\DocumentTypeController;
 use App\Http\Controllers\Api\DocumentValidationController;
+use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\PasswordResetController;
 use App\Http\Controllers\Api\ProductsServicesCatalogController;
 use App\Http\Controllers\Api\ProfileController;
@@ -22,6 +24,7 @@ use App\Http\Controllers\Api\ProviderProfileController;
 use App\Http\Controllers\Api\ProviderTypeController;
 use App\Http\Controllers\Api\ProviderVehicleController;
 use App\Http\Controllers\Api\QualityDashboardController;
+use App\Http\Controllers\Api\ReportController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -218,6 +221,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/provider-types/{providerType}/documents',                 [ProviderTypeController::class, 'assignDocument']);
         Route::patch('/provider-types/{providerType}/documents/{docId}/toggle-required', [ProviderTypeController::class, 'toggleRequired']);
         Route::delete('/provider-types/{providerType}/documents/{docId}',       [ProviderTypeController::class, 'removeDocument']);
+        Route::patch('/provider-types/{providerType}/documents/{docId}/persona', [ProviderTypeController::class, 'updateDocumentPersona']);
     });
     
     // ── Consulta de template por producto (todos los roles autenticados) ──────────
@@ -331,4 +335,34 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::get('/providers/{id}/products-services', [ProductsServicesCatalogController::class, 'providerItems']);
+
+
+    // ── Bloqueos de calendario ────────────────────────────────────────────────
+    // Lectura: compras, seguridad, ingeniero_alimentos
+    Route::middleware(['role:super_admin,admin,compras,seguridad,ingeniero_alimentos'])
+        ->get('/calendar-blocks', [CalendarBlockController::class, 'index']);
+
+    // Escritura: solo compras y admin
+    Route::middleware(['role:super_admin,admin,compras'])->group(function () {
+        Route::post('/calendar-blocks',                [CalendarBlockController::class, 'store']);
+        Route::put('/calendar-blocks/{calendarBlock}', [CalendarBlockController::class, 'update']);
+        Route::delete('/calendar-blocks/{calendarBlock}', [CalendarBlockController::class, 'destroy']);
+    });
+
+    //Notificaciones
+    Route::get('/notifications',            [NotificationController::class, 'index']);
+    Route::post('/notifications/{id}/read',  [NotificationController::class, 'markRead']);
+    Route::post('/notifications/read-all',   [NotificationController::class, 'markAllRead']);
+    
+    //Reportes
+    Route::middleware(['role:super_admin,admin,calidad,compras,ingeniero_alimentos'])->group(function () {
+    Route::get('/reports/appointments/preview',          [ReportController::class, 'appointmentsPreview']);
+    Route::get('/reports/appointments/export',           [ReportController::class, 'appointmentsExport']);
+    Route::get('/reports/providers-compliance/preview',  [ReportController::class, 'providersCompliancePreview']); // ✅ NUEVO
+    Route::get('/reports/providers-compliance/export',   [ReportController::class, 'providersComplianceExport']);  // ✅ NUEVO
+});
+
+
+
+
 });

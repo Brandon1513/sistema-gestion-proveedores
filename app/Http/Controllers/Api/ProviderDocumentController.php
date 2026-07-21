@@ -32,46 +32,53 @@ class ProviderDocumentController extends Controller
      * Documentos requeridos para un proveedor (vista interna — Calidad/Compras)
      */
     public function required(Provider $provider): JsonResponse
-    {
-        $allDocTypes = $provider->providerType
-            ->documentTypes()
-            ->withPivot('is_required')
-            ->get();
+{
+    $allDocTypes = $provider->providerType
+        ->documentTypes()
+        ->withPivot(['is_required', 'applies_to_persona'])
+        ->get();
 
-        $uploadedDocuments = $provider->documents()
-            ->whereIn('document_type_id', $allDocTypes->pluck('id'))
-            ->where('status', 'approved')
-            ->latest('version')
-            ->get()
-            ->groupBy('document_type_id');
+    // ✅ Filtrar según tipo de persona del proveedor
+    $tipoPersona = $provider->tipo_persona ?? 'moral';
+    $allDocTypes = $allDocTypes->filter(function ($docType) use ($tipoPersona) {
+        $applies = $docType->pivot->applies_to_persona ?? 'all';
+        if ($applies === 'all') return true;
+        return $applies === $tipoPersona;
+    })->values();
 
-        $documents = $allDocTypes->map(function ($docType) use ($uploadedDocuments) {
-            $docs = $uploadedDocuments->get($docType->id, collect());
+    $uploadedDocuments = $provider->documents()
+        ->whereIn('document_type_id', $allDocTypes->pluck('id'))
+        ->where('status', 'approved')
+        ->latest('version')
+        ->get()
+        ->groupBy('document_type_id');
 
-            return [
-                'document_type' => $docType,
-                'is_required'   => (bool) $docType->pivot->is_required,
-                'allows_multiple' => (bool) $docType->allows_multiple,
-                // Para docs de carga única devolvemos el primero; para múltiples, todos
-                'uploaded'      => $docs->isNotEmpty(),
-                'document'      => $docType->allows_multiple ? null : $docs->first(),
-                'documents'     => $docType->allows_multiple ? $docs->values() : [],
-            ];
-        });
+    $documents = $allDocTypes->map(function ($docType) use ($uploadedDocuments) {
+        $docs = $uploadedDocuments->get($docType->id, collect());
+        return [
+            'document_type'   => $docType,
+            'is_required'     => (bool) $docType->pivot->is_required,
+            'allows_multiple' => (bool) $docType->allows_multiple,
+            'uploaded'        => $docs->isNotEmpty(),
+            'document'        => $docType->allows_multiple ? null : $docs->first(),
+            'documents'       => $docType->allows_multiple ? $docs->values() : [],
+        ];
+    });
 
-        $requiredDocs   = $documents->where('is_required', true);
-        $totalRequired  = $requiredDocs->count();
-        $totalUploaded  = $requiredDocs->filter(fn($d) => $d['uploaded'])->count();
+    $requiredDocs  = $documents->where('is_required', true);
+    $totalRequired = $requiredDocs->count();
+    $totalUploaded = $requiredDocs->filter(fn($d) => $d['uploaded'])->count();
 
-        return response()->json([
-            'required_documents'   => $documents,
-            'total_required'       => $totalRequired,
-            'total_uploaded'       => $totalUploaded,
-            'completion_percentage' => $totalRequired > 0
-                ? round(($totalUploaded / $totalRequired) * 100, 2)
-                : 0,
-        ]);
-    }
+    return response()->json([
+        'required_documents'    => $documents,
+        'total_required'        => $totalRequired,
+        'total_uploaded'        => $totalUploaded,
+        'completion_percentage' => $totalRequired > 0
+            ? round(($totalUploaded / $totalRequired) * 100, 2)
+            : 0,
+    ]);
+}
+
 
     /**
      * Subir documento
