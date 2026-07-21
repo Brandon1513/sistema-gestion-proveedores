@@ -12,254 +12,188 @@ use Spatie\Permission\Models\Role;
 
 class UserManagementController extends Controller
 {
-    /**
-     * Listar usuarios (solo internos, no proveedores)
-     */
+    // ✅ Roles internos permitidos — un solo lugar para mantener
+    private const INTERNAL_ROLES = [
+        'super_admin',
+        'admin',
+        'compras',
+        'calidad',
+        'seguridad',
+        'ingeniero_alimentos',
+    ];
+
+    private const ROLE_LABELS = [
+        'super_admin'          => 'Super Administrador',
+        'admin'                => 'Administrador',
+        'compras'              => 'Compras',
+        'calidad'              => 'Calidad',
+        'seguridad'            => 'Seguridad',
+        'ingeniero_alimentos'  => 'Ingeniero de Alimentos',
+    ];
+
     public function index(Request $request): JsonResponse
     {
         $query = User::with('roles')
             ->whereHas('roles', function ($q) {
-                $q->whereIn('name', ['super_admin', 'admin', 'compras', 'calidad']);
+                $q->whereIn('name', self::INTERNAL_ROLES);
             });
 
-        // Filtro por rol
-        if ($request->has('role') && $request->role) {
-            $query->whereHas('roles', function ($q) use ($request) {
-                $q->where('name', $request->role);
-            });
+        if ($request->filled('role')) {
+            $query->whereHas('roles', fn($q) => $q->where('name', $request->role));
         }
 
-        // Filtro por búsqueda (nombre o email)
-        if ($request->has('search') && $request->search) {
+        if ($request->filled('search')) {
             $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%");
-            });
+            $query->where(fn($q) => $q->where('name', 'like', "%{$search}%")->orWhere('email', 'like', "%{$search}%"));
         }
 
-        // Filtro por estado
         if ($request->filled('is_active')) {
-        $query->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
+            $query->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
         }
 
-        $users = $query->latest()->paginate(15);
-
-        return response()->json($users);
+        return response()->json($query->latest()->paginate(15));
     }
 
-    /**
-     * Obtener un usuario específico
-     */
     public function show($id): JsonResponse
     {
         $user = User::with('roles')->findOrFail($id);
 
-        // Verificar que no sea un proveedor
         if ($user->hasRole('proveedor')) {
-            return response()->json([
-                'message' => 'No se puede acceder a usuarios de tipo proveedor desde esta vista',
-            ], 403);
+            return response()->json(['message' => 'No se puede acceder a usuarios de tipo proveedor desde esta vista'], 403);
         }
 
         return response()->json($user);
     }
 
-    /**
-     * Crear un nuevo usuario
-     */
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:users,email',
-            'password' => 'required|string|min:8|confirmed',
-            'role' => ['required', Rule::in(['super_admin', 'admin', 'compras', 'calidad'])],
+            'name'      => 'required|string|max:255',
+            'email'     => 'required|email|unique:users,email',
+            'password'  => 'required|string|min:8|confirmed',
+            'role'      => ['required', Rule::in(self::INTERNAL_ROLES)],
             'is_active' => 'boolean',
         ]);
 
         try {
-            // Crear usuario
             $user = User::create([
-                'name' => $validated['name'],
-                'email' => $validated['email'],
-                'password' => Hash::make($validated['password']),
+                'name'      => $validated['name'],
+                'email'     => $validated['email'],
+                'password'  => Hash::make($validated['password']),
                 'is_active' => $validated['is_active'] ?? true,
             ]);
 
-            // Asignar rol
             $user->assignRole($validated['role']);
 
             return response()->json([
                 'message' => 'Usuario creado exitosamente',
-                'user' => $user->load('roles'),
+                'user'    => $user->load('roles'),
             ], 201);
 
         } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Error al crear usuario',
-                'error' => $e->getMessage(),
-            ], 500);
+            return response()->json(['message' => 'Error al crear usuario', 'error' => $e->getMessage()], 500);
         }
     }
 
-    /**
-     * Actualizar un usuario
-     */
     public function update(Request $request, $id): JsonResponse
     {
         $user = User::findOrFail($id);
 
-        // Verificar que no sea un proveedor
         if ($user->hasRole('proveedor')) {
-            return response()->json([
-                'message' => 'No se puede editar usuarios de tipo proveedor desde esta vista',
-            ], 403);
+            return response()->json(['message' => 'No se puede editar usuarios de tipo proveedor desde esta vista'], 403);
         }
 
         $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => ['required', 'email', Rule::unique('users')->ignore($user->id)],
-            'role' => ['required', Rule::in(['super_admin', 'admin', 'compras', 'calidad'])],
+            'name'      => 'required|string|max:255',
+            'email'     => ['required', 'email', Rule::unique('users')->ignore($user->id)],
+            'role'      => ['required', Rule::in(self::INTERNAL_ROLES)],
             'is_active' => 'boolean',
         ]);
 
         try {
-            // Actualizar datos básicos
             $user->update([
-                'name' => $validated['name'],
-                'email' => $validated['email'],
+                'name'      => $validated['name'],
+                'email'     => $validated['email'],
                 'is_active' => $validated['is_active'] ?? $user->is_active,
             ]);
 
-            // Actualizar rol si cambió
-            if ($user->roles->first()->name !== $validated['role']) {
+            if ($user->roles->first()?->name !== $validated['role']) {
                 $user->syncRoles([$validated['role']]);
             }
 
             return response()->json([
                 'message' => 'Usuario actualizado exitosamente',
-                'user' => $user->load('roles'),
+                'user'    => $user->load('roles'),
             ]);
 
         } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Error al actualizar usuario',
-                'error' => $e->getMessage(),
-            ], 500);
+            return response()->json(['message' => 'Error al actualizar usuario', 'error' => $e->getMessage()], 500);
         }
     }
 
-    /**
-     * Cambiar contraseña de un usuario
-     */
     public function updatePassword(Request $request, $id): JsonResponse
     {
-        $user = User::findOrFail($id);
-
-        $validated = $request->validate([
-            'password' => 'required|string|min:8|confirmed',
-        ]);
+        $user      = User::findOrFail($id);
+        $validated = $request->validate(['password' => 'required|string|min:8|confirmed']);
 
         try {
-            $user->update([
-                'password' => Hash::make($validated['password']),
-            ]);
-
-            return response()->json([
-                'message' => 'Contraseña actualizada exitosamente',
-            ]);
-
+            $user->update(['password' => Hash::make($validated['password'])]);
+            return response()->json(['message' => 'Contraseña actualizada exitosamente']);
         } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Error al actualizar contraseña',
-                'error' => $e->getMessage(),
-            ], 500);
+            return response()->json(['message' => 'Error al actualizar contraseña', 'error' => $e->getMessage()], 500);
         }
     }
 
-    /**
-     * Activar/Desactivar un usuario
-     */
     public function toggleStatus($id): JsonResponse
     {
         $user = User::findOrFail($id);
 
-        // No permitir desactivar al super admin actual
         if ($user->id === auth()->id() && $user->hasRole('super_admin')) {
-            return response()->json([
-                'message' => 'No puedes desactivar tu propia cuenta',
-            ], 403);
+            return response()->json(['message' => 'No puedes desactivar tu propia cuenta'], 403);
         }
 
         try {
-            $user->update([
-                'is_active' => !$user->is_active,
-            ]);
-
+            $user->update(['is_active' => !$user->is_active]);
             return response()->json([
                 'message' => $user->is_active ? 'Usuario activado' : 'Usuario desactivado',
-                'user' => $user,
+                'user'    => $user,
             ]);
-
         } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Error al cambiar estado del usuario',
-                'error' => $e->getMessage(),
-            ], 500);
+            return response()->json(['message' => 'Error al cambiar estado', 'error' => $e->getMessage()], 500);
         }
     }
 
-    /**
-     * Eliminar un usuario
-     */
     public function destroy($id): JsonResponse
     {
         $user = User::findOrFail($id);
 
-        // No permitir eliminar al super admin actual
         if ($user->id === auth()->id()) {
-            return response()->json([
-                'message' => 'No puedes eliminar tu propia cuenta',
-            ], 403);
+            return response()->json(['message' => 'No puedes eliminar tu propia cuenta'], 403);
         }
-
-        // No permitir eliminar proveedores
         if ($user->hasRole('proveedor')) {
-            return response()->json([
-                'message' => 'No se puede eliminar usuarios de tipo proveedor desde esta vista',
-            ], 403);
+            return response()->json(['message' => 'No se puede eliminar usuarios de tipo proveedor desde esta vista'], 403);
         }
 
         try {
             $user->delete();
-
-            return response()->json([
-                'message' => 'Usuario eliminado exitosamente',
-            ]);
-
+            return response()->json(['message' => 'Usuario eliminado exitosamente']);
         } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Error al eliminar usuario',
-                'error' => $e->getMessage(),
-            ], 500);
+            return response()->json(['message' => 'Error al eliminar usuario', 'error' => $e->getMessage()], 500);
         }
     }
 
     /**
-     * Listar roles disponibles
+     * Listar roles disponibles para el selector
      */
     public function getRoles(): JsonResponse
     {
-        $roles = Role::whereIn('name', ['super_admin', 'admin', 'compras', 'calidad'])
+        $roles = Role::whereIn('name', self::INTERNAL_ROLES)
             ->select('id', 'name')
             ->get()
-            ->map(function ($role) {
-                return [
-                    'value' => $role->name,
-                    'label' => ucfirst(str_replace('_', ' ', $role->name)),
-                ];
-            });
+            ->map(fn($role) => [
+                'value' => $role->name,
+                'label' => self::ROLE_LABELS[$role->name] ?? ucfirst(str_replace('_', ' ', $role->name)),
+            ]);
 
         return response()->json($roles);
     }

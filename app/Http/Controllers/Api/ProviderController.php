@@ -2,6 +2,10 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Mail\ProviderInvitation as ProviderInvitationMail;
+use App\Models\ProviderInvitation;
+use Illuminate\Support\Facades\Mail;
+use Carbon\Carbon;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreProviderRequest;
 use App\Http\Requests\UpdateProviderRequest;
@@ -53,58 +57,82 @@ class ProviderController extends Controller
      * Crear proveedor
      */
     public function store(StoreProviderRequest $request): JsonResponse
-    {
-        try {
-            DB::beginTransaction();
+{
+    try {
+        DB::beginTransaction();
 
-            $provider = Provider::create(array_merge(
-                $request->validated(),
-                ['created_by' => auth()->id()]
-            ));
+        $provider = Provider::create(array_merge(
+            $request->validated(),
+            ['created_by' => auth()->id()]
+        ));
 
-            // Crear contactos
-            if ($request->has('contacts')) {
-                foreach ($request->contacts as $contact) {
-                    $provider->contacts()->create($contact);
-                }
+        // Crear contactos
+        if ($request->has('contacts')) {
+            foreach ($request->contacts as $contact) {
+                $provider->contacts()->create($contact);
             }
-
-            // Crear vehículos
-            if ($request->has('vehicles')) {
-                foreach ($request->vehicles as $vehicle) {
-                    $provider->vehicles()->create($vehicle);
-                }
-            }
-
-            // Crear personal
-            if ($request->has('personnel')) {
-                foreach ($request->personnel as $person) {
-                    $provider->personnel()->create($person);
-                }
-            }
-
-            // Crear certificaciones
-            if ($request->has('certifications')) {
-                foreach ($request->certifications as $certification) {
-                    $provider->certifications()->create($certification);
-                }
-            }
-
-            DB::commit();
-
-            return response()->json([
-                'message' => 'Proveedor creado exitosamente',
-                'provider' => $provider->load(['providerType', 'contacts', 'vehicles', 'personnel', 'certifications']),
-            ], 201);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json([
-                'message' => 'Error al crear proveedor',
-                'error' => $e->getMessage(),
-            ], 500);
         }
+
+        // Crear vehículos
+        if ($request->has('vehicles')) {
+            foreach ($request->vehicles as $vehicle) {
+                $provider->vehicles()->create($vehicle);
+            }
+        }
+
+        // Crear personal
+        if ($request->has('personnel')) {
+            foreach ($request->personnel as $person) {
+                $provider->personnel()->create($person);
+            }
+        }
+
+        // Crear certificaciones
+        if ($request->has('certifications')) {
+            foreach ($request->certifications as $certification) {
+                $provider->certifications()->create($certification);
+            }
+        }
+
+        DB::commit();
+
+        // ✅ Enviar invitación automática para que el proveedor cree su contraseña
+        if ($provider->email) {
+            try {
+                // Cancelar invitaciones previas pendientes para este email
+                ProviderInvitation::where('email', $provider->email)
+                    ->where('status', 'pending')
+                    ->update(['status' => 'expired']);
+
+                $invitation = ProviderInvitation::create([
+                    'email'            => $provider->email,
+                    'token'            => ProviderInvitation::generateToken(),
+                    'provider_type_id' => $provider->provider_type_id,
+                    'invited_by'       => auth()->id(),
+                    'status'           => 'pending',
+                    'expires_at'       => Carbon::now()->addDays(7),
+                ]);
+
+                Mail::to($invitation->email)->send(new ProviderInvitationMail($invitation));
+
+            } catch (\Exception $mailError) {
+                \Log::warning('Proveedor creado pero no se pudo enviar invitación: ' . $mailError->getMessage());
+            }
+        }
+
+        return response()->json([
+            'message' => 'Proveedor creado exitosamente. Se envió una invitación al correo del proveedor para configurar su acceso.',
+            'provider' => $provider->load(['providerType', 'contacts', 'vehicles', 'personnel', 'certifications']),
+        ], 201);
+
+    } catch (\Exception $e) {
+        DB::rollBack();
+        return response()->json([
+            'message' => 'Error al crear proveedor',
+            'error' => $e->getMessage(),
+        ], 500);
     }
+}
 
     /**
      * Mostrar proveedor

@@ -65,11 +65,11 @@ return [
     |
     */
 
-    'timezone' => 'UTC',
+    'timezone' => 'America/Mexico_City', 
 
     /*
     |--------------------------------------------------------------------------
-    | Application Locale Configuration
+    | Application Locale Configuration 'UTC
     |--------------------------------------------------------------------------
     |
     | The application locale determines the default locale that will be used

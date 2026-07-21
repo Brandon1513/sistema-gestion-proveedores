@@ -37,6 +37,7 @@ class Provider extends Model
         'status',
         'observations',
         'created_by',
+        'tipo_persona',  
     ];
 
     protected $casts = [
@@ -110,5 +111,14 @@ class Provider extends Model
         return $this->documents()
             ->where('status', 'pending')
             ->exists();
+    }
+    public function productsServices(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(
+            \App\Models\ProductService::class,
+            'provider_products_services',
+            'provider_id',
+            'product_service_id'
+        )->withTimestamps();
     }
 }

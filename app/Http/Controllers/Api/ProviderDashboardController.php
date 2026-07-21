@@ -110,13 +110,22 @@ class ProviderDashboardController extends Controller
 
         // ── Todos los tipos de documento asignados a este tipo de proveedor ──
         // withPivot para leer is_required desde la tabla pivot
+        //Además filtramos por tipo de persona (moral/fisica) según el campo provider.tipo_persona
         $docTypes = DocumentType::whereHas('providerTypes', function ($q) use ($provider) {
-                $q->where('provider_type_id', $provider->provider_type_id);
-            })
-            ->with(['providerTypes' => function ($q) use ($provider) {
-                $q->where('provider_type_id', $provider->provider_type_id);
-            }])
-            ->get();
+        $q->where('provider_type_id', $provider->provider_type_id);
+    })
+    ->with(['providerTypes' => function ($q) use ($provider) {
+        $q->where('provider_type_id', $provider->provider_type_id)
+          ->withPivot(['is_required', 'applies_to_persona']);
+    }])
+    ->get()
+    ->filter(function ($docType) use ($provider) {
+        $pivot   = $docType->providerTypes->first()?->pivot;
+        $applies = $pivot?->applies_to_persona ?? 'all';
+        if ($applies === 'all') return true;
+        return $applies === ($provider->tipo_persona ?? 'moral');
+    })
+    ->values();
 
         // ── Todos los documentos cargados por el proveedor (sin filtrar status) ──
         $allUploaded = ProviderDocument::with('documentType')
@@ -131,8 +140,8 @@ class ProviderDashboardController extends Controller
         // ── Mapear cada tipo de documento ────────────────────────────────────
         $documentsWithStatus = $docTypes->map(function ($docType) use ($groupedByType, $provider) {
             // is_required viene del pivot, no del campo global
-            $pivotIsRequired = (bool) optional($docType->providerTypes->first())->pivot->is_required;
-
+            $pivot           = $docType->providerTypes->first()?->pivot;
+            $pivotIsRequired = (bool) ($pivot?->is_required ?? false);
             $docsOfThisType = $groupedByType->get($docType->id, collect());
 
             if ($docType->allows_multiple) {
@@ -140,17 +149,19 @@ class ProviderDashboardController extends Controller
                 $docsArray = $docsOfThisType->map(fn($d) => $this->formatDocument($d))->values();
 
                 return [
-                    'id'               => $docType->id,
-                    'name'             => $docType->name,
-                    'description'      => $docType->description,
-                    'category'         => $docType->category,
-                    'is_required'      => $pivotIsRequired,
-                    'allows_multiple'  => true,
-                    'requires_expiry'  => (bool) $docType->requires_expiry,
-                    'uploaded'         => $docsArray->isNotEmpty(),
-                    'uploaded_document'=> null,
-                    'documents'        => $docsArray,
-                ];
+                        'id'               => $docType->id,
+                        'code'             => $docType->code, 
+                        'name'             => $docType->name,
+                        'description'      => $docType->description,
+                        'category'         => $docType->category,
+                        'is_required'      => $pivotIsRequired,
+                        'allows_multiple'  => true,
+                        'requires_expiry'  => (bool) $docType->requires_expiry,
+                        'expiry_months'    => $docType->expiry_months,   // ✅ NUEVO
+                        'uploaded'         => $docsArray->isNotEmpty(),
+                        'uploaded_document'=> null,
+                        'documents'        => $docsArray,
+                    ];
             } else {
                 // ── Carga única: devolver el documento más relevante ──────
                 // Prioridad: pendiente > aprobado > rechazado > el más reciente
@@ -160,17 +171,19 @@ class ProviderDashboardController extends Controller
                     ?? $docsOfThisType->first();
 
                 return [
-                    'id'               => $docType->id,
-                    'name'             => $docType->name,
-                    'description'      => $docType->description,
-                    'category'         => $docType->category,
-                    'is_required'      => $pivotIsRequired,
-                    'allows_multiple'  => false,
-                    'requires_expiry'  => (bool) $docType->requires_expiry,
-                    'uploaded'         => $best !== null,
-                    'uploaded_document'=> $best ? $this->formatDocument($best) : null,
-                    'documents'        => [],
-                ];
+                        'id'               => $docType->id,
+                        'code'             => $docType->code, 
+                        'name'             => $docType->name,
+                        'description'      => $docType->description,
+                        'category'         => $docType->category,
+                        'is_required'      => $pivotIsRequired,
+                        'allows_multiple'  => false,
+                        'requires_expiry'  => (bool) $docType->requires_expiry,
+                        'expiry_months'    => $docType->expiry_months,   // ✅ NUEVO
+                        'uploaded'         => $best !== null,
+                        'uploaded_document'=> $best ? $this->formatDocument($best) : null,
+                        'documents'        => [],
+                    ];
             }
         });
 
@@ -244,4 +257,31 @@ class ProviderDashboardController extends Controller
                 : null,
         ];
     }
+    public function myProductsServices(Request $request): JsonResponse
+{
+    $user     = $request->user();
+    $provider = Provider::where('email', $user->email)->first();
+ 
+    if (!$provider) {
+        return response()->json(['message' => 'Proveedor no encontrado'], 404);
+    }
+ 
+    $items = $provider->productsServices()
+        ->where('products_services.is_active', true)
+        ->orderBy('products_services.type')
+        ->orderBy('products_services.name')
+        ->get()
+        ->map(fn($item) => [
+            'id'   => $item->id,
+            'name' => $item->name,
+            'type' => $item->type, // 'product' | 'service'
+        ]);
+ 
+    return response()->json([
+        'products' => $items->where('type', 'product')->values(),
+        'services' => $items->where('type', 'service')->values(),
+        'all'      => $items->values(),
+    ]);
+}
+ 
 }

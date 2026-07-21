@@ -78,17 +78,21 @@ class DocumentValidationController extends Controller
 
     /**
      * Validar documento (aprobar o rechazar)
-     * ✅ Con activación/desactivación automática del proveedor
+     *  Con activación/desactivación automática del proveedor
+     *  Con posibilidad de corregir issue_date/expiry_date durante la validación
      */
     public function validate(Request $request, $providerId, $documentId): JsonResponse
     {
         $validated = $request->validate([
             'status' => 'required|in:approved,rejected',
             'comments' => 'required_if:status,rejected|nullable|string|max:1000',
+            'issue_date' => 'nullable|date',
+            'expiry_date' => 'nullable|date|after_or_equal:issue_date',
         ], [
             'status.required' => 'Debe especificar un estado (approved o rejected)',
             'status.in' => 'El estado debe ser "approved" o "rejected"',
             'comments.required_if' => 'Los comentarios son obligatorios al rechazar un documento',
+            'expiry_date.after_or_equal' => 'La fecha de vencimiento no puede ser anterior a la fecha de emisión',
         ]);
 
         try {
@@ -96,13 +100,45 @@ class DocumentValidationController extends Controller
                 ->where('provider_id', $providerId)
                 ->firstOrFail();
 
-            $document->update(['status' => $validated['status']]);
+            // ✅ Capturamos las fechas originales antes de sobreescribir, para
+            // poder anotar en el historial si Calidad las corrigió.
+            $originalIssueDate  = $document->issue_date?->format('Y-m-d');
+            $originalExpiryDate = $document->expiry_date?->format('Y-m-d');
+
+            $newIssueDate  = $validated['issue_date']  ?? $originalIssueDate;
+            $newExpiryDate = $validated['expiry_date'] ?? $originalExpiryDate;
+
+            $datesChanged = $newIssueDate !== $originalIssueDate || $newExpiryDate !== $originalExpiryDate;
+
+            $updateData = ['status' => $validated['status']];
+            if (array_key_exists('issue_date', $validated) && $validated['issue_date']) {
+                $updateData['issue_date'] = $validated['issue_date'];
+            }
+            if (array_key_exists('expiry_date', $validated) && $validated['expiry_date']) {
+                $updateData['expiry_date'] = $validated['expiry_date'];
+            }
+
+            $document->update($updateData);
+
+            // ✅ Si las fechas cambiaron, dejamos constancia en el historial
+            // de validación, aunque el revisor no haya escrito comentarios.
+            $comments = $validated['comments'] ?? null;
+            if ($datesChanged) {
+                $dateNote = sprintf(
+                    'Fechas corregidas durante la validación — Emisión: %s → %s | Vencimiento: %s → %s.',
+                    $originalIssueDate ?? 'N/A',
+                    $newIssueDate ?? 'N/A',
+                    $originalExpiryDate ?? 'N/A',
+                    $newExpiryDate ?? 'N/A'
+                );
+                $comments = trim(($comments ? $comments . "\n\n" : '') . $dateNote);
+            }
 
             $validation = DocumentValidation::create([
                 'provider_document_id' => $document->id,
                 'validated_by' => auth()->id(),
                 'action' => $validated['status'],
-                'comments' => $validated['comments'] ?? null,
+                'comments' => $comments,
                 'validated_at' => now(),
             ]);
 
@@ -143,6 +179,7 @@ class DocumentValidationController extends Controller
                 'validation' => $validation,
                 'provider_activated' => $providerActivated,
                 'provider_status' => $provider->fresh()->status,
+                'dates_corrected' => $datesChanged,
             ]);
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {

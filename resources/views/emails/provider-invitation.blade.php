@@ -1,15 +1,12 @@
 @extends('emails.layout')
-
 @section('content')
     <div class="email-title">
         ¡Bienvenido a DASAVENA!
     </div>
-
     <div class="email-content">
         <p>Has sido invitado a registrarte como proveedor en nuestro Sistema de Gestión de Proveedores.</p>
         <p>Estamos emocionados de iniciar esta colaboración contigo.</p>
     </div>
-
     <div class="info-box">
         <div class="info-box-title">Información de tu invitación</div>
         <div class="info-row">
@@ -27,12 +24,10 @@
             </div>
         </div>
     </div>
-
     <div class="alert alert-warning">
-        <strong>Importante:</strong> Esta invitación expira en <strong>7 días</strong>. 
+        <strong>Importante:</strong> Esta invitación expira en <strong>7 días</strong>.
         Por favor, completa tu registro antes de la fecha de expiración.
     </div>
-
     <div class="email-content">
         <p><strong>Para completar tu registro, sigue estos pasos:</strong></p>
         <ol style="margin-left: 20px; color: #4a5568; line-height: 1.8;">
@@ -43,12 +38,32 @@
         </ol>
     </div>
 
+    {{-- ✅ Manual de Usuario --}}
+    <div class="info-box" style="background: linear-gradient(135deg, #F5F0F6 0%, #E6D9E9 100%); border-left: 4px solid #6A2C75; margin: 24px 0;">
+        <div class="info-box-title" style="color: #6A2C75;">
+            📖 Manual de Usuario
+        </div>
+        <p style="color: #4a5568; font-size: 14px; margin-bottom: 15px;">
+            Para facilitar tu proceso de registro y uso del sistema, hemos preparado un manual completo
+            con instrucciones paso a paso. Te recomendamos descargarlo antes de comenzar.
+        </p>
+        <div style="text-align: center;">
+            <a href="{{ config('app.url') }}/docs/manual_proveedor.pdf"
+               target="_blank"
+               style="display: inline-block; background-color: #6A2C75; color: #ffffff; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px;">
+                📥 Descargar Manual de Usuario
+            </a>
+        </div>
+        <p style="color: #9ca3af; font-size: 12px; text-align: center; margin-top: 10px;">
+            Formato PDF · Incluye guía de registro, carga de documentos y uso del portal
+        </p>
+    </div>
+
     <div style="text-align: center; margin: 30px 0;">
         <a href="{{ $registrationUrl }}" class="button">
             ✓ Completar Registro
         </a>
     </div>
-
     <div class="email-content" style="background-color: #f9fafb; padding: 15px; border-radius: 8px;">
         <p style="font-size: 13px; color: #6b7280; margin-bottom: 8px;">
             <strong>¿No puedes hacer clic en el botón?</strong>
@@ -60,7 +75,6 @@
             {{ $registrationUrl }}
         </p>
     </div>
-
     <div class="info-box">
         <div class="info-box-title">Beneficios del sistema</div>
         <ul style="margin-left: 20px; color: #4a5568; line-height: 1.8;">
@@ -71,14 +85,12 @@
             <li>Proceso de validación más rápido y eficiente</li>
         </ul>
     </div>
-
     <div class="email-content">
         <p style="color: #6b7280; font-size: 14px;">
-            <strong>¿Necesitas ayuda?</strong> Si tienes alguna duda sobre el proceso de registro 
+            <strong>¿Necesitas ayuda?</strong> Si tienes alguna duda sobre el proceso de registro
             o necesitas asistencia, no dudes en contactarnos.
         </p>
     </div>
-
     <div style="text-align: center; margin-top: 30px; padding: 20px; background: linear-gradient(135deg, #F5F0F6 0%, #E6D9E9 100%); border-radius: 8px;">
         <p style="font-size: 14px; color: #6A2C75; font-weight: 600;">
             ¡Esperamos trabajar contigo muy pronto!
