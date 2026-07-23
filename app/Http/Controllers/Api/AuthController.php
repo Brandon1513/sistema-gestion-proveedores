@@ -73,7 +73,7 @@ class AuthController extends Controller
         ]);
     }
 
-    /**
+   /**
      * Registro de proveedor con token de invitación
      */
     public function registerProvider(RegisterProviderRequest $request): JsonResponse
@@ -100,24 +100,43 @@ class AuthController extends Controller
 
             $user->assignRole('proveedor');
 
+            // ✅ Datos completos capturados en el formulario de registro
+            $providerData = [
+                'provider_type_id'     => $invitation->provider_type_id,
+                'business_name'        => $request->business_name,
+                'rfc'                  => strtoupper($request->rfc),
+                'tipo_persona'         => $request->tipo_persona ?: (strlen($request->rfc) === 13 ? 'fisica' : 'moral'),
+                'legal_representative' => $request->legal_representative,
+                'phone'                => $request->phone,
+                'street'               => $request->street,
+                'exterior_number'      => $request->exterior_number,
+                'interior_number'      => $request->interior_number,
+                'neighborhood'         => $request->neighborhood,
+                'city'                 => $request->city,
+                'state'                => $request->state,
+                'postal_code'          => $request->postal_code,
+                'bank'                 => $request->bank,
+                'bank_branch'          => $request->bank_branch,
+                'account_number'       => $request->account_number,
+                'clabe'                => $request->clabe,
+                'credit_amount'        => $request->credit_amount ?: null,
+                'credit_days'          => $request->credit_days ?: null,
+                'observations'         => $request->observations,
+            ];
+
             // ✅ Detectar si ya existe un proveedor creado manualmente con este email
             $provider = Provider::where('email', $invitation->email)->first();
 
             if ($provider) {
-                // Proveedor creado manualmente — actualizar con los datos del registro
-                $provider->update([
-                    'business_name' => $request->business_name,
-                    'rfc'           => strtoupper($request->rfc),
-                ]);
+                // Proveedor creado manualmente — completar/actualizar con los datos del registro
+                $provider->update($providerData);
             } else {
                 // Flujo normal de invitación — crear proveedor nuevo
                 $provider = Provider::create([
-                    'provider_type_id' => $invitation->provider_type_id,
-                    'business_name'    => $request->business_name,
-                    'rfc'              => strtoupper($request->rfc),
-                    'email'            => $invitation->email,
-                    'status'           => 'pending',
-                    'created_by'       => $invitation->invited_by,
+                    ...$providerData,
+                    'email'      => $invitation->email,
+                    'status'     => 'pending',
+                    'created_by' => $invitation->invited_by,
                 ]);
             }
 

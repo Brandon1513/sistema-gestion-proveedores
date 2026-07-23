@@ -31,6 +31,29 @@ class RegisterProviderRequest extends FormRequest
                     }),
                 ],
             'password'      => 'required|string|min:8|confirmed',
+
+            // ✅ NUEVO — antes se capturaban en el formulario pero no se validaban ni guardaban
+            'tipo_persona'         => 'nullable|in:fisica,moral',
+            'legal_representative' => 'nullable|string|max:255',
+            'phone'                => 'required|string|max:20',
+
+            // Dirección
+            'street'          => 'required|string|max:255',
+            'exterior_number' => 'required|string|max:50',
+            'interior_number' => 'nullable|string|max:50',
+            'neighborhood'    => 'required|string|max:255',
+            'city'            => 'required|string|max:255',
+            'state'           => 'required|string|max:255',
+            'postal_code'     => 'required|string|max:10',
+
+            // Datos bancarios (opcionales)
+            'bank'           => 'nullable|string|max:255',
+            'bank_branch'    => 'nullable|string|max:255',
+            'account_number' => 'nullable|string|max:50',
+            'clabe'          => 'nullable|string|max:18',
+            'credit_amount'  => 'nullable|numeric|min:0',
+            'credit_days'    => 'nullable|integer|min:0',
+            'observations'   => 'nullable|string|max:2000',
         ];
     }
 
@@ -49,6 +72,15 @@ class RegisterProviderRequest extends FormRequest
             'password.required'      => 'La contraseña es requerida',
             'password.min'           => 'La contraseña debe tener al menos 8 caracteres',
             'password.confirmed'     => 'Las contraseñas no coinciden',
+
+            // ✅ NUEVO
+            'phone.required'           => 'El teléfono es requerido',
+            'street.required'          => 'La calle es requerida',
+            'exterior_number.required' => 'El número exterior es requerido',
+            'neighborhood.required'   => 'La colonia es requerida',
+            'city.required'           => 'La ciudad es requerida',
+            'state.required'          => 'El estado es requerido',
+            'postal_code.required'    => 'El código postal es requerido',
         ];
     }
 }
