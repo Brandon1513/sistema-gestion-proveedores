@@ -16,6 +16,7 @@ class ProviderInvitation extends Model
         'email',
         'token',
         'provider_type_id',
+        'provider_request_id', // ✅ nuevo
         'invited_by',
         'status',
         'expires_at',
@@ -42,6 +43,12 @@ class ProviderInvitation extends Model
     public function provider(): BelongsTo
     {
         return $this->belongsTo(Provider::class);
+    }
+
+    // ✅ nuevo — la solicitud interna que originó esta invitación, si aplica
+    public function providerRequest(): BelongsTo
+    {
+        return $this->belongsTo(ProviderRequest::class);
     }
 
     // Scopes

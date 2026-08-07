@@ -54,6 +54,20 @@ class RegisterProviderRequest extends FormRequest
             'credit_amount'  => 'nullable|numeric|min:0',
             'credit_days'    => 'nullable|integer|min:0',
             'observations'   => 'nullable|string|max:2000',
+
+            'contacts'              => 'required|array|min:1',
+            'contacts.*.type'       => 'required|in:sales,billing,quality',
+            'contacts.*.name'       => 'required|string|max:255',
+            'contacts.*.phone'      => 'required|string|max:20',
+            'contacts.*.email'      => 'required|email|max:255',
+            
+            // Y en messages():
+            'contacts.required'        => 'Debes agregar al menos un contacto',
+            'contacts.min'              => 'Debes agregar al menos un contacto',
+            'contacts.*.name.required'  => 'El nombre del contacto es obligatorio',
+            'contacts.*.phone.required' => 'El teléfono del contacto es obligatorio',
+            'contacts.*.email.required' => 'El correo del contacto es obligatorio',
+
         ];
     }
 

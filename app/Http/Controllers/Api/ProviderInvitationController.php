@@ -86,6 +86,9 @@ class ProviderInvitationController extends Controller
     /**
      * Verificar invitación por token
      */
+    /**
+     * Verificar invitación por token
+     */
     public function verify(string $token): JsonResponse
     {
         $invitation = ProviderInvitation::where('token', $token)
@@ -112,6 +115,10 @@ class ProviderInvitationController extends Controller
             ], 400);
         }
 
+        // ✅ Si ya existe un proveedor creado manualmente con este email,
+        // devolvemos sus datos para que el frontend pre-llene el formulario.
+        $existingProvider = \App\Models\Provider::where('email', $invitation->email)->first();
+
         return response()->json([
             'valid' => true,
             'invitation' => [
@@ -119,6 +126,28 @@ class ProviderInvitationController extends Controller
                 'provider_type' => $invitation->providerType,
                 'expires_at' => $invitation->expires_at,
             ],
+            // ✅ NUEVO
+            'existing_provider' => $existingProvider ? [
+                'business_name'        => $existingProvider->business_name,
+                'rfc'                  => $existingProvider->rfc,
+                'tipo_persona'         => $existingProvider->tipo_persona,
+                'legal_representative' => $existingProvider->legal_representative,
+                'phone'                => $existingProvider->phone,
+                'street'               => $existingProvider->street,
+                'exterior_number'      => $existingProvider->exterior_number,
+                'interior_number'      => $existingProvider->interior_number,
+                'neighborhood'         => $existingProvider->neighborhood,
+                'city'                 => $existingProvider->city,
+                'state'                => $existingProvider->state,
+                'postal_code'          => $existingProvider->postal_code,
+                'bank'                 => $existingProvider->bank,
+                'bank_branch'          => $existingProvider->bank_branch,
+                'account_number'       => $existingProvider->account_number,
+                'clabe'                => $existingProvider->clabe,
+                'credit_amount'        => $existingProvider->credit_amount,
+                'credit_days'          => $existingProvider->credit_days,
+                'observations'         => $existingProvider->observations,
+            ] : null,
         ]);
     }
 

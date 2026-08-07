@@ -20,6 +20,7 @@ class UserManagementController extends Controller
         'calidad',
         'seguridad',
         'ingeniero_alimentos',
+        'emp_solicitante',
     ];
 
     private const ROLE_LABELS = [
@@ -29,6 +30,7 @@ class UserManagementController extends Controller
         'calidad'              => 'Calidad',
         'seguridad'            => 'Seguridad',
         'ingeniero_alimentos'  => 'Ingeniero de Alimentos',
+        'emp_solicitante'      => 'Empleado Solicitante',
     ];
 
     public function index(Request $request): JsonResponse

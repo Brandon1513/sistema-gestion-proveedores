@@ -76,33 +76,39 @@ class AuthController extends Controller
    /**
      * Registro de proveedor con token de invitación
      */
-    public function registerProvider(RegisterProviderRequest $request): JsonResponse
+        public function registerProvider(RegisterProviderRequest $request): JsonResponse
     {
         $invitation = ProviderInvitation::where('token', $request->token)
             ->where('status', 'pending')
             ->first();
-
+ 
         if (!$invitation || $invitation->is_expired) {
             return response()->json([
                 'message' => 'Invitación inválida o expirada',
             ], 400);
         }
-
+ 
         try {
             DB::beginTransaction();
-
+ 
             $user = User::create([
                 'name'              => $request->name,
                 'email'             => $invitation->email,
                 'password'          => Hash::make($request->password),
                 'email_verified_at' => now(),
             ]);
-
+ 
             $user->assignRole('proveedor');
-
-            // ✅ Datos completos capturados en el formulario de registro
+ 
+            // ✅ Si esta invitación vino de una solicitud interna (módulo de
+            // solicitudes), heredamos su department_id y requested_by.
+            $originatingRequest = $invitation->provider_request_id
+                ? \App\Models\ProviderRequest::find($invitation->provider_request_id)
+                : null;
+ 
             $providerData = [
                 'provider_type_id'     => $invitation->provider_type_id,
+                'department_id'        => $originatingRequest?->department_id,
                 'business_name'        => $request->business_name,
                 'rfc'                  => strtoupper($request->rfc),
                 'tipo_persona'         => $request->tipo_persona ?: (strlen($request->rfc) === 13 ? 'fisica' : 'moral'),
@@ -122,16 +128,15 @@ class AuthController extends Controller
                 'credit_amount'        => $request->credit_amount ?: null,
                 'credit_days'          => $request->credit_days ?: null,
                 'observations'         => $request->observations,
+                'requested_by'         => $originatingRequest?->requested_by,
             ];
-
+ 
             // ✅ Detectar si ya existe un proveedor creado manualmente con este email
             $provider = Provider::where('email', $invitation->email)->first();
-
+ 
             if ($provider) {
-                // Proveedor creado manualmente — completar/actualizar con los datos del registro
                 $provider->update($providerData);
             } else {
-                // Flujo normal de invitación — crear proveedor nuevo
                 $provider = Provider::create([
                     ...$providerData,
                     'email'      => $invitation->email,
@@ -139,13 +144,29 @@ class AuthController extends Controller
                     'created_by' => $invitation->invited_by,
                 ]);
             }
+            // ✅ Guardar el/los contacto(s) obligatorios capturados en el registro
+            if ($request->filled('contacts')) {
+                $provider->contacts()->delete(); // por si ya tenía contactos de una creación manual previa
+                foreach ($request->contacts as $contact) {
+                    $provider->contacts()->create($contact);
+                }
+            }
 
+ 
             $invitation->markAsAccepted($provider);
-
+ 
+            // ✅ Cerrar el ciclo de la solicitud interna, si existía
+            if ($originatingRequest) {
+                $originatingRequest->update([
+                    'status'      => 'registered',
+                    'provider_id' => $provider->id,
+                ]);
+            }
+ 
             DB::commit();
-
+ 
             $token = $user->createToken('auth-token')->plainTextToken;
-
+ 
             return response()->json([
                 'message' => 'Registro exitoso',
                 'user' => [
@@ -161,7 +182,7 @@ class AuthController extends Controller
                 ],
                 'token' => $token,
             ], 201);
-
+ 
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json([
@@ -170,6 +191,7 @@ class AuthController extends Controller
             ], 500);
         }
     }
+
 
     /**
      * Logout

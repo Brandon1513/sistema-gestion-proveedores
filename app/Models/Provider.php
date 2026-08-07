@@ -14,6 +14,7 @@ class Provider extends Model
 
     protected $fillable = [
         'provider_type_id',
+        'department_id',      // ✅ nuevo
         'business_name',
         'rfc',
         'legal_representative',
@@ -37,7 +38,8 @@ class Provider extends Model
         'status',
         'observations',
         'created_by',
-        'tipo_persona',  
+        'requested_by',       // ✅ nuevo
+        'tipo_persona',
     ];
 
     protected $casts = [
@@ -49,6 +51,12 @@ class Provider extends Model
     public function providerType(): BelongsTo
     {
         return $this->belongsTo(ProviderType::class);
+    }
+
+    // ✅ nuevo
+    public function department(): BelongsTo
+    {
+        return $this->belongsTo(Department::class);
     }
 
     public function contacts(): HasMany
@@ -79,6 +87,18 @@ class Provider extends Model
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    // ✅ nuevo — usuario interno que solicitó el alta de este proveedor
+    public function requestedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'requested_by');
+    }
+
+    // ✅ nuevo — la solicitud que originó este proveedor, si aplica
+    public function providerRequest(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(ProviderRequest::class);
     }
 
     // Scopes
