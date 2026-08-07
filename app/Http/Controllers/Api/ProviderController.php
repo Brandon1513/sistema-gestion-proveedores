@@ -21,7 +21,7 @@ class ProviderController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Provider::with(['providerType', 'contacts', 'documents.documentType']);
+        $query = Provider::with(['providerType', 'department', 'requestedBy', 'contacts', 'documents.documentType']);
 
         // Filtros
         if ($request->has('status')) {
@@ -141,6 +141,8 @@ class ProviderController extends Controller
 {
     $provider->load([
         'providerType',
+        'department',    
+        'requestedBy',   
         'contacts',
         'vehicles',
         'personnel',

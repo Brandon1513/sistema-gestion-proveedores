@@ -25,6 +25,8 @@ use App\Http\Controllers\Api\ProviderTypeController;
 use App\Http\Controllers\Api\ProviderVehicleController;
 use App\Http\Controllers\Api\QualityDashboardController;
 use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\DepartmentController;
+use App\Http\Controllers\Api\ProviderRequestController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -47,6 +49,34 @@ Route::get('/providers/{provider}/documents/{document}/view', [ProviderDocumentC
 
 // Rutas protegidas por autenticación
 Route::middleware('auth:sanctum')->group(function () {
+
+        // ===============================
+    // DEPARTAMENTOS
+    // ===============================
+    Route::get('/departments', [DepartmentController::class, 'index']); // lectura: todos los roles autenticados
+    
+    Route::middleware(['role:super_admin,admin'])->group(function () {
+        Route::post('/departments',           [DepartmentController::class, 'store']);
+        Route::put('/departments/{department}', [DepartmentController::class, 'update']);
+    });
+    
+    // ===============================
+    // SOLICITUDES DE ALTA DE PROVEEDOR
+    // ===============================
+    
+    // emp_solicitante: crear y ver solo las suyas
+    Route::middleware(['role:emp_solicitante,super_admin,admin,compras'])->group(function () {
+        Route::post('/provider-requests',          [ProviderRequestController::class, 'store']);
+        Route::get('/provider-requests/mine',      [ProviderRequestController::class, 'myIndex']);
+    });
+    
+    // Compras/Admin: ver todas, aprobar (envía invitación), rechazar
+    Route::middleware(['role:super_admin,admin,compras'])->group(function () {
+        Route::get('/provider-requests',                    [ProviderRequestController::class, 'index']);
+        Route::post('/provider-requests/{providerRequest}/approve', [ProviderRequestController::class, 'approve']);
+        Route::post('/provider-requests/{providerRequest}/reject',  [ProviderRequestController::class, 'reject']);
+    });
+
 
     // ===============================
     // AUTH

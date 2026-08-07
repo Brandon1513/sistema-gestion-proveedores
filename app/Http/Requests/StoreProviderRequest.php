@@ -57,6 +57,7 @@ class StoreProviderRequest extends FormRequest
             'credit_amount'       => 'nullable|numeric|min:0',
             'credit_days'         => 'nullable|integer|min:0',
             'observations'        => 'nullable|string|max:2000',
+            'department_id' => 'nullable|exists:departments,id',
         ];
     }
 
