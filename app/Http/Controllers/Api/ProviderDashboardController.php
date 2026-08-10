@@ -156,8 +156,9 @@ class ProviderDashboardController extends Controller
                         'category'         => $docType->category,
                         'is_required'      => $pivotIsRequired,
                         'allows_multiple'  => true,
+                        'is_product_specific' => (bool) $docType->is_product_specific,
                         'requires_expiry'  => (bool) $docType->requires_expiry,
-                        'expiry_months'    => $docType->expiry_months,   // ✅ NUEVO
+                        'expiry_months'    => $docType->expiry_months,   
                         'uploaded'         => $docsArray->isNotEmpty(),
                         'uploaded_document'=> null,
                         'documents'        => $docsArray,
@@ -178,8 +179,9 @@ class ProviderDashboardController extends Controller
                         'category'         => $docType->category,
                         'is_required'      => $pivotIsRequired,
                         'allows_multiple'  => false,
+                        'is_product_specific' => (bool) $docType->is_product_specific,
                         'requires_expiry'  => (bool) $docType->requires_expiry,
-                        'expiry_months'    => $docType->expiry_months,   // ✅ NUEVO
+                        'expiry_months'    => $docType->expiry_months,   
                         'uploaded'         => $best !== null,
                         'uploaded_document'=> $best ? $this->formatDocument($best) : null,
                         'documents'        => [],

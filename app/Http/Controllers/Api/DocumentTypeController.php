@@ -45,6 +45,7 @@ class DocumentTypeController extends Controller
                         'pivot_sort_order'    => $pivot?->sort_order ?? 0,
                         'applies_to_existing' => $pivot?->applies_to_existing ?? true,
                         'expiry_months'       => $doc->expiry_months,
+                        'is_product_specific' => $doc->is_product_specific,
                         'provider_types'      => $doc->providerTypes->map(fn($ptype) => [
                             'id'   => $ptype->id,
                             'name' => $ptype->name,
@@ -102,6 +103,7 @@ class DocumentTypeController extends Controller
             'is_required_map'     => 'nullable|array',
             'applies_to_existing' => 'boolean',
             'expiry_months'       => 'nullable|integer|min:1|max:120',
+            'is_product_specific' => 'boolean',
         ]);
 
         // ✅ Auto-generar código único si no viene
@@ -133,6 +135,7 @@ class DocumentTypeController extends Controller
                 'is_active'          => true,
                 'is_required'        => false,
                 'expiry_months'      => $validated['expiry_months'] ?? null,
+                'is_product_specific' => $validated['is_product_specific'] ?? false,
             ]);
 
             if (!empty($validated['provider_type_ids'])) {
@@ -186,6 +189,7 @@ class DocumentTypeController extends Controller
             'is_required_map'     => 'nullable|array',
             'applies_to_existing' => 'boolean',
             'expiry_months'       => 'nullable|integer|min:1|max:120',
+            'is_product_specific' => 'boolean',
         ]);
 
         // ✅ Auto-generar código único si no viene (al actualizar)
@@ -216,6 +220,7 @@ class DocumentTypeController extends Controller
                 'max_file_size_mb'   => $validated['max_file_size_mb'] ?? 10,
                 'is_active'          => $validated['is_active'] ?? true,
                 'expiry_months'      => $validated['expiry_months'] ?? null,
+                'is_product_specific' => $validated['is_product_specific'] ?? false,
             ]);
 
             if (isset($validated['provider_type_ids'])) {

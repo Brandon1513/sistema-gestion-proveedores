@@ -10,6 +10,7 @@ use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
+use App\Services\NotificationDispatcher;
 
 class ProviderRequestController extends Controller
 {
@@ -41,6 +42,15 @@ class ProviderRequestController extends Controller
             'requested_by' => $request->user()->id,
             'status'       => 'pending',
         ]);
+
+        NotificationDispatcher::notifyRoles(
+            ['super_admin', 'admin', 'compras'],
+            $request->user()->id,
+            'provider_request_created',
+            'Nueva solicitud de alta de proveedor',
+            "{$request->user()->name} solicitó dar de alta a \"{$providerRequest->provider_business_name}\"",
+            ['link' => '/provider-requests']
+        );
 
         return response()->json([
             'message'          => 'Solicitud enviada correctamente. El equipo de Compras la revisará.',
