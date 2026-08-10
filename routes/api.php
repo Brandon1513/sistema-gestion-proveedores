@@ -233,13 +233,17 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/document-types/groups/{id}',        [DocumentTypeController::class, 'destroyGroup']);
     });
 
-        // ── Gestión de templates (Calidad + Admin) ────────────────────────────────────
-    Route::middleware(['role:calidad,super_admin,admin'])->group(function () {
-        Route::get('/document-templates',           [App\Http\Controllers\Api\DocumentTemplateController::class, 'index']);
+    // ── Gestión de templates (Calidad + Admin) ────────────────────────────────────
+    Route::middleware(['role:calidad,super_admin,admin,compras'])->group(function () {
+        Route::get('/document-templates',                  [App\Http\Controllers\Api\DocumentTemplateController::class, 'index']);
         Route::get('/document-templates/catalog-products', [DocumentTemplateController::class, 'getCatalogProducts']);
-        Route::post('/document-templates',          [App\Http\Controllers\Api\DocumentTemplateController::class, 'store']);
-        Route::delete('/document-templates/{id}',   [App\Http\Controllers\Api\DocumentTemplateController::class, 'destroy']);
+        Route::post('/document-templates/generic',         [DocumentTemplateController::class, 'storeGeneric']);
+        Route::post('/document-templates',                 [App\Http\Controllers\Api\DocumentTemplateController::class, 'store']);
+        Route::delete('/document-templates/{id}',          [App\Http\Controllers\Api\DocumentTemplateController::class, 'destroy']);
     });
+
+// ── Consulta de plantillas (cualquier usuario autenticado, incluyendo proveedor) ──
+Route::get('/document-templates/generic/{documentTypeId}', [DocumentTemplateController::class, 'getGenericTemplates']);
 
     // ── Gestión de Tipos de Proveedor (CRUD completo) ─────────────────────────
     Route::middleware(['role:super_admin,admin,calidad'])->group(function () {

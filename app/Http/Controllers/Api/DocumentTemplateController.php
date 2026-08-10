@@ -152,6 +152,50 @@ class DocumentTemplateController extends Controller
         ]);
     }
 
+    // ─── NUEVO: Adjuntar plantillas genéricas (sin producto) — hasta varias por documento ──
+    public function storeGeneric(Request $request): JsonResponse
+    {
+        $request->validate([
+            'document_type_id' => 'required|exists:document_types,id',
+            'files'             => 'required|array|min:1|max:5',
+            'files.*'           => 'file|mimes:pdf,doc,docx,xls,xlsx|max:10240', 
+        ]);
+
+        $created = [];
+        foreach ($request->file('files') as $file) {
+            $originalName = $file->getClientOriginalName();
+            $baseName     = pathinfo($originalName, PATHINFO_FILENAME);
+            $fileName     = 'template_' . Str::slug($baseName) . '_' . time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+            $path         = $file->storeAs('document_templates', $fileName, 'documents');
+
+            $created[] = DocumentTemplate::create([
+                'document_type_id'  => $request->document_type_id,
+                'template_name'     => $baseName,
+                'product_name'      => 'general', // ✅ mismo centinela que ya usa el flujo sin selector de producto
+                'file_path'         => $path,
+                'original_filename' => $originalName,
+                'is_active'         => true,
+            ]);
+        }
+
+        return response()->json([
+            'message'   => count($created) . ' plantilla(s) adjuntada(s) correctamente',
+            'templates' => $created,
+        ], 201);
+    }
+
+    // ─── NUEVO: Listar TODAS las plantillas genéricas de un tipo de documento ──
+    public function getGenericTemplates($documentTypeId): JsonResponse
+    {
+        $templates = DocumentTemplate::where('document_type_id', $documentTypeId)
+            ->where('product_name', 'general')
+            ->where('is_active', true)
+            ->orderBy('id')
+            ->get(['id', 'template_name', 'original_filename']);
+
+        return response()->json(['templates' => $templates]);
+    }
+
     // ─── Obtener productos del catálogo ───────────────────────────────────────
     public function getCatalogProducts(): JsonResponse
     {
