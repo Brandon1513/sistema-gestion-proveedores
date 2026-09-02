@@ -14,7 +14,7 @@ class Provider extends Model
 
     protected $fillable = [
         'provider_type_id',
-        'department_id',      // ✅ nuevo
+        'department_id',      
         'business_name',
         'rfc',
         'legal_representative',
@@ -38,8 +38,9 @@ class Provider extends Model
         'status',
         'observations',
         'created_by',
-        'requested_by',       // ✅ nuevo
+        'requested_by',       
         'tipo_persona',
+        'netsuite_internal_id',
     ];
 
     protected $casts = [
@@ -67,6 +68,25 @@ class Provider extends Model
     public function vehicles(): HasMany
     {
         return $this->hasMany(ProviderVehicle::class);
+    }
+
+    public function netsuiteInvoices()
+    {
+        return $this->hasMany(NetsuiteVendorInvoice::class);
+    }
+
+    public function netsuitePayments()
+    {
+        return $this->hasMany(NetsuiteVendorPayment::class);
+    }
+
+    public function netsuiteCreditMemos()
+    {
+        return $this->hasMany(NetsuiteCreditMemo::class);
+    }
+    public function creditNoteRequests()
+    {
+        return $this->hasMany(ProviderCreditNoteRequest::class);
     }
 
     public function personnel(): HasMany

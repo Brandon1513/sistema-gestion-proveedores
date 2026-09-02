@@ -35,4 +35,21 @@ return [
         ],
     ],
 
+    'microsoft' => [
+        'client_id'     => env('AZURE_CLIENT_ID'),
+        'client_secret' => env('AZURE_CLIENT_SECRET'),
+        'redirect'      => env('AZURE_REDIRECT_URI'),
+        'tenant'        => env('AZURE_TENANT_ID'),
+    ],
+
+    'netsuite' => [
+    'account_id'      => env('NETSUITE_ACCOUNT_ID'),
+    'consumer_key'    => env('NETSUITE_CONSUMER_KEY'),
+    'consumer_secret' => env('NETSUITE_CONSUMER_SECRET'),
+    'token_id'        => env('NETSUITE_TOKEN_ID'),
+    'token_secret'    => env('NETSUITE_TOKEN_SECRET'),
+    'file_restlet_script_id' => env('NETSUITE_FILE_RESTLET_SCRIPT_ID'),
+    'file_restlet_deploy_id' => env('NETSUITE_FILE_RESTLET_DEPLOY_ID'),
+    ],
+
 ];

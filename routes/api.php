@@ -5,15 +5,19 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CalendarBlockController;
 use App\Http\Controllers\Api\CatalogImportController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\DepartmentController;
 use App\Http\Controllers\Api\DocumentStatusController;
 use App\Http\Controllers\Api\DocumentTemplateController;
 use App\Http\Controllers\Api\DocumentTypeController;
 use App\Http\Controllers\Api\DocumentValidationController;
+use App\Http\Controllers\Api\FinanceAccountStatementController;
+use App\Http\Controllers\Api\MicrosoftAuthController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\PasswordResetController;
 use App\Http\Controllers\Api\ProductsServicesCatalogController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\ProviderAccountController;
+use App\Http\Controllers\Api\ProviderAccountStatementController;
 use App\Http\Controllers\Api\ProviderCertificationController;
 use App\Http\Controllers\Api\ProviderController;
 use App\Http\Controllers\Api\ProviderDashboardController;
@@ -21,12 +25,11 @@ use App\Http\Controllers\Api\ProviderDocumentController;
 use App\Http\Controllers\Api\ProviderDocumentUploadController;
 use App\Http\Controllers\Api\ProviderInvitationController;
 use App\Http\Controllers\Api\ProviderProfileController;
+use App\Http\Controllers\Api\ProviderRequestController;
 use App\Http\Controllers\Api\ProviderTypeController;
 use App\Http\Controllers\Api\ProviderVehicleController;
 use App\Http\Controllers\Api\QualityDashboardController;
 use App\Http\Controllers\Api\ReportController;
-use App\Http\Controllers\Api\DepartmentController;
-use App\Http\Controllers\Api\ProviderRequestController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -43,12 +46,14 @@ Route::post('/forgot-password', [PasswordResetController::class, 'forgotPassword
 Route::post('/reset-password',  [PasswordResetController::class, 'resetPassword']);
 Route::get('/invitations/verify/{token}', [ProviderInvitationController::class, 'verify']);
 
+Route::post('/auth/microsoft/exchange', [MicrosoftAuthController::class, 'exchange']);
+
 // Esta ruta maneja su propia autenticación mediante el token en query parameter
 Route::get('/providers/{provider}/documents/{document}/view', [ProviderDocumentController::class, 'view'])
     ->name('providers.documents.view');
 
 // Rutas protegidas por autenticación
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['check.token.expiration', 'auth:sanctum'])->group(function () {
 
         // ===============================
     // DEPARTAMENTOS
@@ -128,6 +133,19 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/documents/required', [ProviderDashboardController::class, 'requiredDocuments']);
         Route::get('/documents/expiring', [ProviderDashboardController::class, 'expiringDocuments']);
         Route::get('/products-services-my', [ProviderDashboardController::class, 'myProductsServices']);
+        // Estado de cuenta (NetSuite)
+        Route::get('/account-statement', [ProviderAccountStatementController::class, 'index']);
+        Route::middleware('throttle:30,1')->group(function () {
+            Route::get('/netsuite-files/{type}/{id}', [ProviderAccountStatementController::class, 'downloadNetSuiteFile']);
+            Route::get('/credit-note-requests/{id}/file', [ProviderAccountStatementController::class, 'downloadMyCreditNoteFile']);
+            Route::get('/credit-note-requests/{id}/response-file', [ProviderAccountStatementController::class, 'downloadMyResponseFile']);
+        });
+        Route::post('/credit-note-requests/{id}/respond', [ProviderAccountStatementController::class, 'respondToCreditNoteRequest']);
+        Route::get('/invoices/{id}/timeline', [ProviderAccountStatementController::class, 'invoiceTimeline']);
+
+        Route::get('/payments/{id}/related-invoices', [ProviderAccountStatementController::class, 'paymentRelatedInvoices']);
+        Route::get('/credit-memos/{id}/related-invoices', [ProviderAccountStatementController::class, 'creditMemoRelatedInvoices']);
+        Route::get('/account-statement/export', [ProviderAccountStatementController::class, 'exportExcel']);
 
         // Upload
         Route::post('/documents/upload', [ProviderDocumentUploadController::class, 'upload']);
@@ -168,6 +186,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/products-services', [ProductsServicesCatalogController::class, 'providerGetCatalog']);
         Route::put('/products-services', [ProductsServicesCatalogController::class, 'providerUpdateSelection']);
     });
+
 
     // Vista global certificaciones
     Route::get('/certifications', [ProviderCertificationController::class, 'globalIndex']);
@@ -392,8 +411,30 @@ Route::get('/document-templates/generic/{documentTypeId}', [DocumentTemplateCont
     Route::middleware(['role:super_admin,admin,calidad,compras,ingeniero_alimentos'])->group(function () {
     Route::get('/reports/appointments/preview',          [ReportController::class, 'appointmentsPreview']);
     Route::get('/reports/appointments/export',           [ReportController::class, 'appointmentsExport']);
-    Route::get('/reports/providers-compliance/preview',  [ReportController::class, 'providersCompliancePreview']); // ✅ NUEVO
-    Route::get('/reports/providers-compliance/export',   [ReportController::class, 'providersComplianceExport']);  // ✅ NUEVO
+    Route::get('/reports/providers-compliance/preview',  [ReportController::class, 'providersCompliancePreview']); 
+    Route::get('/reports/providers-compliance/export',   [ReportController::class, 'providersComplianceExport']);  
+
+        // ===============================
+    // ESTADO DE CUENTA — COMPRAS/FINANZAS
+    // ===============================
+    Route::middleware(['role:super_admin,admin,compras,finanzas'])->prefix('finance')->group(function () {
+        Route::get('/account-statement', [FinanceAccountStatementController::class, 'index']);
+        Route::get('/credit-note-requests', [FinanceAccountStatementController::class, 'creditNoteRequests']);
+        Route::patch('/credit-note-requests/{id}/review', [FinanceAccountStatementController::class, 'reviewCreditNoteRequest']);
+        Route::get('/providers-search', [FinanceAccountStatementController::class, 'searchProviders']);
+        Route::post('/credit-note-requests', [FinanceAccountStatementController::class, 'storeCreditNoteRequest']);
+        Route::get('/invoices/{id}/timeline', [FinanceAccountStatementController::class, 'invoiceTimeline']);
+        Route::get('/payments/{id}/related-invoices', [FinanceAccountStatementController::class, 'paymentRelatedInvoices']);
+        Route::get('/credit-memos/{id}/related-invoices', [FinanceAccountStatementController::class, 'creditMemoRelatedInvoices']);
+        Route::get('/dashboard-kpis', [FinanceAccountStatementController::class, 'dashboardKpis']);
+        Route::get('/account-statement/export', [FinanceAccountStatementController::class, 'exportExcel']);
+
+        Route::middleware('throttle:30,1')->group(function () {
+            Route::get('/netsuite-files/{type}/{id}', [FinanceAccountStatementController::class, 'downloadNetSuiteFile']);
+            Route::get('/credit-note-requests/{id}/file', [FinanceAccountStatementController::class, 'downloadCreditNoteFile']);
+            Route::get('/credit-note-requests/{id}/response-file', [FinanceAccountStatementController::class, 'downloadProviderResponseFile']);
+        });
+    });
 });
 
 

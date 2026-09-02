@@ -51,6 +51,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Inactivity Expiration Minutes (custom - CheckTokenExpiration middleware)
+    |--------------------------------------------------------------------------
+    |
+    | Minutos de inactividad permitidos antes de que el middleware
+    | CheckTokenExpiration invalide el token automáticamente. A diferencia
+    | de "expiration" (arriba), este valor SÍ se renueva mientras el
+    | usuario esté activo, porque se basa en last_used_at.
+    |
+    */
+
+    'inactivity_expiration' => env('SANCTUM_INACTIVITY_MINUTES', 480),
+
+    /*
+    |--------------------------------------------------------------------------
     | Token Prefix
     |--------------------------------------------------------------------------
     |

@@ -43,6 +43,24 @@ Schedule::command('documents:check-expiring --days=7 --send-emails')
     ->timezone('America/Mexico_City')
     ->emailOutputOnFailure('brandon.devora@dasavena.com');
 
+Schedule::command('netsuite:reconcile-providers')
+    ->dailyAt('03:00')
+    ->withoutOverlapping()
+    ->emailOutputOnFailure('brandon.devora@dasavena.com'); // opcional, o cámbialo por tu notificación preferida    
+
+Schedule::command('netsuite:reconcile-providers')
+    ->dailyAt('03:00')
+    ->withoutOverlapping();
+
+Schedule::command('netsuite:sync-vendor-data')
+    ->everyFourHours()
+    ->withoutOverlapping();
+
+Schedule::command('netsuite:notify-overdue-invoices')
+    ->dailyAt('08:00')
+    ->weekdays()
+    ->withoutOverlapping();
+
 // ALTERNATIVAS (comentadas - descomenta si prefieres usarlas):
 
 // Ejecutar cada 12 horas (8 AM y 8 PM)
