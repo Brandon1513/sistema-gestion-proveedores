@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class NetSuiteClient
@@ -209,31 +210,72 @@ public function getCreditMemoUnapplied(string $id): ?float
 protected function paginatedTransactionQuery(string $type, array $columns, string $sinceDate, array $entityIds = []): array
 {
     if (empty($entityIds)) {
-        return []; // sin proveedores vinculados, no hay nada que traer
+        return [];
     }
 
     $pageSize = 1000;
-    $offset = 0;
-    $all = [];
     $columnList = implode(', ', $columns);
     $entityList = implode(',', array_map('intval', $entityIds));
 
-    do {
-        $query = "SELECT {$columnList}
-                  FROM transaction
-                  WHERE type = '{$type}'
-                    AND trandate >= TO_DATE('{$sinceDate}', 'YYYY-MM-DD')
-                    AND entity IN ({$entityList})
-                  ORDER BY id
-                  OFFSET {$offset} ROWS FETCH NEXT {$pageSize} ROWS ONLY";
+    $query = "SELECT {$columnList}
+              FROM transaction
+              WHERE type = '{$type}'
+                AND trandate >= TO_DATE('{$sinceDate}', 'YYYY-MM-DD')
+                AND entity IN ({$entityList})
+              ORDER BY id";
 
-        $page = $this->suiteql($query);
+    $all = [];
+    $offset = 0;
+    $maxIterations = 50;
+    $iteration = 0;
+
+    do {
+        $iteration++;
+        if ($iteration > $maxIterations) {
+            Log::error('paginatedTransactionQuery: tope de iteraciones alcanzado', [
+                'type' => $type, 'total_acumulado' => count($all),
+            ]);
+            break;
+        }
+
+        [$page, $hasMore] = $this->suiteqlPaged($query, $pageSize, $offset);
+
         $all = array_merge($all, $page);
         $offset += $pageSize;
-    } while (count($page) === $pageSize);
+    } while ($hasMore);
 
     return $all;
 }
+
+/**
+ * Ejecuta una consulta SuiteQL con paginación vía parámetros "limit" y
+ * "offset" en la URL del POST (el endpoint SuiteQL solo acepta POST,
+ * el link "next" que regresa NO se puede seguir con GET).
+ * Regresa [items, hayMasPaginas].
+ */
+protected function suiteqlPaged(string $query, int $limit, int $offset): array
+{
+    $url = "{$this->baseUrl}/query/v1/suiteql?limit={$limit}&offset={$offset}";
+    $method = 'POST';
+
+    $response = Http::withHeaders([
+        'Authorization' => $this->buildAuthHeader($url, $method),
+        'Content-Type'  => 'application/json',
+        'Prefer'        => 'transient',
+    ])->post($url, ['q' => $query]);
+
+    if ($response->failed()) {
+        throw new \RuntimeException("NetSuite SuiteQL falló ({$response->status()}): {$response->body()}");
+    }
+
+    $json = $response->json();
+    $items = $json['items'] ?? [];
+    $hasMore = $json['hasMore'] ?? (count($items) === $limit);
+
+    return [$items, $hasMore];
+}
+
+
 
     /**
      * Trae los documentos aplicados a una factura (pagos y notas de
