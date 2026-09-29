@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Log;
 
 class SyncNetSuiteVendorData extends Command
 {
-    protected $signature = 'netsuite:sync-vendor-data {--since=2026-01-01}';
+    protected $signature = 'netsuite:sync-vendor-data {--since=2026-01-01} {--provider-id=}';
     protected $description = 'Sincroniza facturas, pagos y notas de crédito de proveedores desde NetSuite';
 
     public function handle(NetSuiteClient $client): int
@@ -25,6 +25,20 @@ class SyncNetSuiteVendorData extends Command
         // de cada documento sin tener que consultar uno por uno.
         $providerMap = Provider::whereNotNull('netsuite_internal_id')
             ->pluck('id', 'netsuite_internal_id');
+
+        // Si se pidió un proveedor específico, filtra el mapa a solo ese —
+        // el resto de la lógica (syncInvoices, etc.) no necesita cambiar,
+        // porque ya usa $providerMap y $entityIds para todo.
+        $onlyProviderId = $this->option('provider-id');
+
+        if ($onlyProviderId) {
+            $providerMap = $providerMap->filter(fn ($id) => (int) $id === (int) $onlyProviderId);
+
+            if ($providerMap->isEmpty()) {
+                $this->error("El proveedor {$onlyProviderId} no existe o no está vinculado a NetSuite.");
+                return self::FAILURE;
+            }
+        }
 
         $this->info("Proveedores vinculados a NetSuite: {$providerMap->count()}\n");
 
@@ -43,7 +57,7 @@ class SyncNetSuiteVendorData extends Command
                 'module' => $module,
                 'records_synced' => $count,
                 'status' => 'exitoso',
-                'message' => "{$count} registros sincronizados desde {$since}",
+                'message' => "{$count} registros sincronizados desde {$since}" . ($onlyProviderId ? " (proveedor {$onlyProviderId})" : ''),
                 'duration_ms' => $durationMs,
                 'created_at' => now(),
                 'updated_at' => now(),
