@@ -20,12 +20,15 @@ use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use Illuminate\Support\Facades\Log;
+use App\Models\ProviderInvoiceSubmission;
+use App\Models\ProviderPaymentComplement;
 
 
 
 
 class ProviderAccountStatementController extends Controller
 {
+    private const COMPLEMENT_REQUIRED_SINCE = '2026-06-01';
     /**
      * Resuelve el Provider ligado al usuario autenticado (mismo patrón
      * que el resto del portal proveedor: match por email).
@@ -41,38 +44,39 @@ class ProviderAccountStatementController extends Controller
      * mismo ha subido. Todo filtrado estrictamente por su propio provider_id.
      */
     public function index(Request $request): JsonResponse
-    {
-        $provider = $this->currentProvider($request);
+{
+    $provider = $this->currentProvider($request);
 
-        $invoices = NetsuiteVendorInvoice::where('provider_id', $provider->id)
-            ->orderByDesc('tran_date')
-            ->get();
+    $invoices = NetsuiteVendorInvoice::where('provider_id', $provider->id)
+        ->orderByDesc('tran_date')
+        ->get();
 
-        $payments = NetsuiteVendorPayment::where('provider_id', $provider->id)
-            ->orderByDesc('tran_date')
-            ->get();
+    $payments = NetsuiteVendorPayment::where('provider_id', $provider->id)
+        ->orderByDesc('tran_date')
+        ->get();
 
-        $creditMemos = NetsuiteCreditMemo::where('provider_id', $provider->id)
-            ->orderByDesc('tran_date')
-            ->get();
+    $creditMemos = NetsuiteCreditMemo::where('provider_id', $provider->id)
+        ->orderByDesc('tran_date')
+        ->get();
 
-        $creditNoteRequests = ProviderCreditNoteRequest::where('provider_id', $provider->id)
-            ->with('relatedInvoice:id,tran_id')
-            ->orderByDesc('created_at')
-            ->get();
+    $creditNoteRequests = ProviderCreditNoteRequest::where('provider_id', $provider->id)
+        ->with('relatedInvoice:id,tran_id')
+        ->orderByDesc('created_at')
+        ->get();
 
-        return response()->json([
-            'invoices' => $invoices,
-            'payments' => $payments,
-            'credit_memos' => $creditMemos,
-            'credit_note_requests' => $creditNoteRequests,
-            'summary' => [
-                'total_pending' => $invoices->where('status', '!=', 'Pagado por completo')->sum('amount'),
-                'invoices_count' => $invoices->count(),
-                'last_synced_at' => $invoices->max('last_synced_at'),
-            ],
-        ]);
-    }
+    return response()->json([
+        'invoices' => $invoices,
+        'payments' => $payments,
+        'credit_memos' => $creditMemos,
+        'credit_note_requests' => $creditNoteRequests,
+        'complement_required_since' => config('services.payment_complements.required_since'),
+        'summary' => [
+            'total_pending' => $invoices->where('status', '!=', 'Pagado por completo')->sum('amount'),
+            'invoices_count' => $invoices->count(),
+            'last_synced_at' => $invoices->max('last_synced_at'),
+        ],
+    ]);
+}
 
     public function downloadNetSuiteFile(Request $request, NetSuiteClient $client, string $type, int $id)
     {
@@ -226,8 +230,62 @@ class ProviderAccountStatementController extends Controller
             'invoice' => $invoice,
             'applied_payments' => $payments,
             'applied_credit_memos' => $creditMemos,
+            'payment_block' => $this->resolvePaymentBlock($invoice, $payments),
         ]);
     }
+
+        /**
+     * Determina si el pago de esta factura está detenido por registros
+     * pendientes: notas de crédito abiertas relacionadas, o (si la factura
+     * es PPD) complementos de pago que el proveedor aún no ha subido/no
+     * han sido validados.
+     */
+    protected function resolvePaymentBlock(NetsuiteVendorInvoice $invoice, $appliedPayments): array
+{
+    $reasons = [];
+
+    $openCreditNotes = ProviderCreditNoteRequest::where('related_invoice_id', $invoice->id)
+        ->whereIn('status', ['pending', 'in_review', 'approved'])
+        ->count();
+
+    if ($openCreditNotes > 0) {
+        $reasons[] = $openCreditNotes === 1
+            ? 'Tiene 1 nota de crédito pendiente de cerrar.'
+            : "Tiene {$openCreditNotes} notas de crédito pendientes de cerrar.";
+    }
+
+    $submission = ProviderInvoiceSubmission::where('netsuite_vendor_invoice_id', $invoice->id)
+        ->where('status', ProviderInvoiceSubmission::STATUS_CAPTURED)
+        ->first();
+
+    $complementRequiredSince = config('services.payment_complements.required_since');
+
+    if (
+        $submission
+        && $submission->payment_method === 'PPD'
+        && $appliedPayments->isNotEmpty()
+        && $invoice->tran_date?->format('Y-m-d') >= $complementRequiredSince
+    ) {
+        $paymentIds = $appliedPayments->pluck('id');
+
+        $approvedComplements = ProviderPaymentComplement::whereIn('netsuite_vendor_payment_id', $paymentIds)
+            ->where('status', ProviderPaymentComplement::STATUS_APPROVED)
+            ->pluck('netsuite_vendor_payment_id');
+
+        $missing = $paymentIds->diff($approvedComplements);
+
+        if ($missing->isNotEmpty()) {
+            $reasons[] = $missing->count() === 1
+                ? 'Falta subir/validar el complemento de pago de 1 pago aplicado.'
+                : "Faltan subir/validar complementos de pago de {$missing->count()} pagos aplicados.";
+        }
+    }
+
+    return [
+        'blocked' => !empty($reasons),
+        'reasons' => $reasons,
+    ];
+}
 
     public function paymentRelatedInvoices(Request $request, NetSuiteClient $client, int $id): JsonResponse
     {

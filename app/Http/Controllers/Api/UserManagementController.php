@@ -18,6 +18,8 @@ class UserManagementController extends Controller
         'admin',
         'compras',
         'calidad',
+        'finanzas',
+        'cuentas_por_pagar',
         'seguridad',
         'ingeniero_alimentos',
         'emp_solicitante',
@@ -28,6 +30,8 @@ class UserManagementController extends Controller
         'admin'                => 'Administrador',
         'compras'              => 'Compras',
         'calidad'              => 'Calidad',
+        'finanzas'             => 'Finanzas',
+        'cuentas_por_pagar'    => 'Cuentas por Pagar',
         'seguridad'            => 'Seguridad',
         'ingeniero_alimentos'  => 'Ingeniero de Alimentos',
         'emp_solicitante'      => 'Empleado Solicitante',
@@ -73,7 +77,8 @@ class UserManagementController extends Controller
             'name'      => 'required|string|max:255',
             'email'     => 'required|email|unique:users,email',
             'password'  => 'required|string|min:8|confirmed',
-            'role'      => ['required', Rule::in(self::INTERNAL_ROLES)],
+            'roles'     => 'required|array|min:1',
+            'roles.*'   => [Rule::in(self::INTERNAL_ROLES)],
             'is_active' => 'boolean',
         ]);
 
@@ -85,7 +90,7 @@ class UserManagementController extends Controller
                 'is_active' => $validated['is_active'] ?? true,
             ]);
 
-            $user->assignRole($validated['role']);
+            $user->syncRoles($validated['roles']);
 
             return response()->json([
                 'message' => 'Usuario creado exitosamente',
@@ -108,7 +113,8 @@ class UserManagementController extends Controller
         $validated = $request->validate([
             'name'      => 'required|string|max:255',
             'email'     => ['required', 'email', Rule::unique('users')->ignore($user->id)],
-            'role'      => ['required', Rule::in(self::INTERNAL_ROLES)],
+            'roles'     => 'required|array|min:1',
+            'roles.*'   => [Rule::in(self::INTERNAL_ROLES)],
             'is_active' => 'boolean',
         ]);
 
@@ -119,8 +125,11 @@ class UserManagementController extends Controller
                 'is_active' => $validated['is_active'] ?? $user->is_active,
             ]);
 
-            if ($user->roles->first()?->name !== $validated['role']) {
-                $user->syncRoles([$validated['role']]);
+            $currentRoles = $user->roles->pluck('name')->sort()->values()->all();
+            $newRoles = collect($validated['roles'])->sort()->values()->all();
+
+            if ($currentRoles !== $newRoles) {
+                $user->syncRoles($validated['roles']);
             }
 
             return response()->json([

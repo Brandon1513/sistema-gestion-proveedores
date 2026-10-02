@@ -23,38 +23,41 @@ class CheckRole
             ], 401);
         }
 
-        // Obtener el rol del usuario
-        // Maneja tanto role directo como roles de Spatie
-        $userRole = null;
-        
+        // Obtener TODOS los roles del usuario — un usuario puede tener
+        // varios a la vez (ej. ingeniero_alimentos + cuentas_por_pagar).
+        // Maneja tanto role directo como roles de Spatie.
+        $userRoleNames = [];
+
         if ($request->user()->role) {
-            // Si tiene propiedad role directa
-            $userRole = $request->user()->role;
+            // Si tiene propiedad role directa (legado, un solo rol)
+            $userRoleNames = [$request->user()->role];
         } elseif (method_exists($request->user(), 'roles')) {
-            // Si usa Spatie Laravel Permission
+            // Spatie Laravel Permission — puede tener varios roles
             $userRoles = $request->user()->roles;
             if ($userRoles && $userRoles->count() > 0) {
-                $userRole = $userRoles->first()->name;
+                $userRoleNames = $userRoles->pluck('name')->all();
             }
         }
 
-        // Si no se pudo obtener el rol
-        if (!$userRole) {
+        // Si no se pudo obtener ningún rol
+        if (empty($userRoleNames)) {
             return response()->json([
                 'message' => 'Usuario sin rol asignado',
             ], 403);
         }
 
         // Convertir a minúsculas para comparación case-insensitive
-        $userRole = strtolower($userRole);
+        $normalizedUserRoles = array_map('strtolower', $userRoleNames);
         $allowedRoles = array_map('strtolower', $roles);
 
-        // Verificar si el usuario tiene uno de los roles permitidos
-        if (!in_array($userRole, $allowedRoles)) {
+        // Verificar si el usuario tiene AL MENOS UNO de los roles permitidos
+        $hasAccess = !empty(array_intersect($normalizedUserRoles, $allowedRoles));
+
+        if (!$hasAccess) {
             return response()->json([
                 'message' => 'No tienes permisos para acceder a este recurso',
                 'required_roles' => $roles,
-                'your_role' => $request->user()->role ?? $request->user()->roles->first()->name ?? 'sin rol',
+                'your_roles' => $userRoleNames,
             ], 403);
         }
 

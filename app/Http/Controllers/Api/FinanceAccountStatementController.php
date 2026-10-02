@@ -20,9 +20,14 @@ use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Cache;
+use App\Models\ProviderInvoiceSubmission;
+use App\Models\ProviderPaymentComplement;
 
 class FinanceAccountStatementController extends Controller
 {
+    private const COMPLEMENT_REQUIRED_SINCE = '2026-06-01';
     /**
      * Vista global de facturas, pagos y notas de crédito, filtrable
      * por proveedor. Para Compras/Finanzas — ven todos los proveedores,
@@ -263,7 +268,7 @@ class FinanceAccountStatementController extends Controller
         return Storage::disk('local')->download($creditNoteRequest->provider_response_file_path);
     }
 
-    public function invoiceTimeline(NetSuiteClient $client, int $id): JsonResponse
+   public function invoiceTimeline(NetSuiteClient $client, int $id): JsonResponse
     {
         $invoice = NetsuiteVendorInvoice::findOrFail($id);
 
@@ -282,8 +287,56 @@ class FinanceAccountStatementController extends Controller
             'invoice' => $invoice->load('provider:id,business_name'),
             'applied_payments' => $payments,
             'applied_credit_memos' => $creditMemos,
+            'payment_block' => $this->resolvePaymentBlock($invoice, $payments),
         ]);
     }
+
+    protected function resolvePaymentBlock(NetsuiteVendorInvoice $invoice, $appliedPayments): array
+{
+    $reasons = [];
+
+    $openCreditNotes = ProviderCreditNoteRequest::where('related_invoice_id', $invoice->id)
+        ->whereIn('status', ['pending', 'in_review', 'approved'])
+        ->count();
+
+    if ($openCreditNotes > 0) {
+        $reasons[] = $openCreditNotes === 1
+            ? 'Tiene 1 nota de crédito pendiente de cerrar.'
+            : "Tiene {$openCreditNotes} notas de crédito pendientes de cerrar.";
+    }
+
+    $submission = ProviderInvoiceSubmission::where('netsuite_vendor_invoice_id', $invoice->id)
+        ->where('status', ProviderInvoiceSubmission::STATUS_CAPTURED)
+        ->first();
+
+    $complementRequiredSince = config('services.payment_complements.required_since');
+
+    if (
+        $submission
+        && $submission->payment_method === 'PPD'
+        && $appliedPayments->isNotEmpty()
+        && $invoice->tran_date?->format('Y-m-d') >= $complementRequiredSince
+    ) {
+        $paymentIds = $appliedPayments->pluck('id');
+
+        $approvedComplements = ProviderPaymentComplement::whereIn('netsuite_vendor_payment_id', $paymentIds)
+            ->where('status', ProviderPaymentComplement::STATUS_APPROVED)
+            ->pluck('netsuite_vendor_payment_id');
+
+        $missing = $paymentIds->diff($approvedComplements);
+
+        if ($missing->isNotEmpty()) {
+            $reasons[] = $missing->count() === 1
+                ? 'Falta subir/validar el complemento de pago de 1 pago aplicado.'
+                : "Faltan subir/validar complementos de pago de {$missing->count()} pagos aplicados.";
+        }
+    }
+
+    return [
+        'blocked' => !empty($reasons),
+        'reasons' => $reasons,
+    ];
+}
     public function paymentRelatedInvoices(NetSuiteClient $client, int $id): JsonResponse
     {
         $payment = NetsuiteVendorPayment::findOrFail($id);
@@ -431,6 +484,46 @@ protected function writeSheet($sheet, string $title, array $headerRows, array $d
 
     $sheet->getStyle('A1:' . $sheet->getHighestColumn() . '1')->getFont()->setName('Arial');
     $sheet->getStyle('A2:' . $sheet->getHighestColumn() . $sheet->getHighestRow())->getFont()->setName('Arial');
+}
+
+public function syncProviderNow(Request $request, int $providerId): JsonResponse
+{
+    $provider = Provider::whereNotNull('netsuite_internal_id')->findOrFail($providerId);
+
+    $lockKey = "sync-provider-lock:{$provider->id}";
+
+    if (Cache::has($lockKey)) {
+        return response()->json([
+            'message' => 'Ya hay una sincronización en curso para este proveedor. Espera un momento.',
+        ], 429);
+    }
+
+    Cache::put($lockKey, true, now()->addMinutes(2));
+
+    try {
+        Artisan::call('netsuite:sync-vendor-data', ['--provider-id' => $provider->id]);
+        $output = Artisan::output();
+
+        Log::info('Sincronización manual de proveedor ejecutada', [
+            'provider_id' => $provider->id,
+            'user_id' => $request->user()->id,
+            'output' => $output,
+        ]);
+
+        return response()->json([
+            'message' => 'Sincronización completada',
+            'last_synced_at' => now()->toIso8601String(),
+        ]);
+    } catch (\Throwable $e) {
+        Log::error('Falló la sincronización manual de proveedor', [
+            'provider_id' => $provider->id,
+            'error' => $e->getMessage(),
+        ]);
+
+        return response()->json(['message' => 'Ocurrió un error al sincronizar. Intenta de nuevo.'], 500);
+    } finally {
+        Cache::forget($lockKey);
+    }
 }
 
 }

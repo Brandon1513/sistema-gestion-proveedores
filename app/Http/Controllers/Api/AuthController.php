@@ -76,36 +76,50 @@ class AuthController extends Controller
    /**
      * Registro de proveedor con token de invitación
      */
-        public function registerProvider(RegisterProviderRequest $request): JsonResponse
+     public function registerProvider(RegisterProviderRequest $request): JsonResponse
     {
         $invitation = ProviderInvitation::where('token', $request->token)
             ->where('status', 'pending')
             ->first();
- 
+
         if (!$invitation || $invitation->is_expired) {
             return response()->json([
                 'message' => 'Invitación inválida o expirada',
             ], 400);
         }
- 
+
+        // ── Capa 3: red de seguridad final. Si por cualquier camino alguien
+        // llega hasta aquí y el correo de la invitación ya tiene una cuenta
+        // de usuario real, detenemos antes de intentar crear un User
+        // duplicado (que tronaría con el error 500 genérico que vimos con
+        // Judith). Las Capas 1 y 2 ya deberían evitar llegar hasta aquí en
+        // el flujo normal — esto es solo el respaldo.
+        $existingUser = User::where('email', $invitation->email)->first();
+
+        if ($existingUser) {
+            return response()->json([
+                'message' => 'Ya existe una cuenta con este correo. Si eres tú, inicia sesión normalmente o usa "¿Olvidaste tu contraseña?" en vez de completar este formulario de invitación.',
+            ], 409);
+        }
+
         try {
             DB::beginTransaction();
- 
+
             $user = User::create([
                 'name'              => $request->name,
                 'email'             => $invitation->email,
                 'password'          => Hash::make($request->password),
                 'email_verified_at' => now(),
             ]);
- 
+
             $user->assignRole('proveedor');
- 
+
             // ✅ Si esta invitación vino de una solicitud interna (módulo de
             // solicitudes), heredamos su department_id y requested_by.
             $originatingRequest = $invitation->provider_request_id
                 ? \App\Models\ProviderRequest::find($invitation->provider_request_id)
                 : null;
- 
+
             $providerData = [
                 'provider_type_id'     => $invitation->provider_type_id,
                 'department_id'        => $originatingRequest?->department_id,
@@ -130,10 +144,10 @@ class AuthController extends Controller
                 'observations'         => $request->observations,
                 'requested_by'         => $originatingRequest?->requested_by,
             ];
- 
+
             // ✅ Detectar si ya existe un proveedor creado manualmente con este email
             $provider = Provider::where('email', $invitation->email)->first();
- 
+
             if ($provider) {
                 $provider->update($providerData);
             } else {
@@ -152,9 +166,8 @@ class AuthController extends Controller
                 }
             }
 
- 
             $invitation->markAsAccepted($provider);
- 
+
             // ✅ Cerrar el ciclo de la solicitud interna, si existía
             if ($originatingRequest) {
                 $originatingRequest->update([
@@ -162,11 +175,11 @@ class AuthController extends Controller
                     'provider_id' => $provider->id,
                 ]);
             }
- 
+
             DB::commit();
- 
+
             $token = $user->createToken('auth-token')->plainTextToken;
- 
+
             return response()->json([
                 'message' => 'Registro exitoso',
                 'user' => [
@@ -182,16 +195,23 @@ class AuthController extends Controller
                 ],
                 'token' => $token,
             ], 201);
- 
+
         } catch (\Exception $e) {
             DB::rollBack();
+
+            \Log::error('Error al registrar proveedor', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'email' => $invitation->email ?? null,
+                'token' => $request->token ?? null,
+            ]);
+
             return response()->json([
                 'message' => 'Error al registrar proveedor',
                 'error'   => $e->getMessage(),
             ], 500);
         }
     }
-
 
     /**
      * Logout

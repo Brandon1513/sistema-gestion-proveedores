@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\InviteProviderRequest;
 use App\Mail\ProviderInvitation as ProviderInvitationMail;
 use App\Models\ProviderInvitation;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
@@ -20,7 +21,6 @@ class ProviderInvitationController extends Controller
     {
         $query = ProviderInvitation::with(['providerType', 'invitedBy', 'provider']);
 
-        // Filtros
         if ($request->has('status')) {
             $query->where('status', $request->status);
         }
@@ -40,7 +40,6 @@ class ProviderInvitationController extends Controller
     public function store(InviteProviderRequest $request): JsonResponse
     {
         try {
-            // Verificar si ya existe una invitación pendiente para este email
             $existingInvitation = ProviderInvitation::where('email', $request->email)
                 ->where('status', 'pending')
                 ->where('expires_at', '>', Carbon::now())
@@ -52,7 +51,24 @@ class ProviderInvitationController extends Controller
                 ], 422);
             }
 
-            // Crear invitación
+            // ── Capa 1: alerta si ya existe una CUENTA (User) con login
+            // funcional para este correo. No alertamos si solo existe el
+            // registro Provider sin cuenta todavía — eso es el flujo normal
+            // cuando se da de alta manual y se invita después para que
+            // complete su acceso.
+            $existingUser = User::where('email', $request->email)->first();
+
+            if ($existingUser && !$request->boolean('confirm_send_anyway')) {
+                return response()->json([
+                    'message' => 'Ya existe una cuenta activa con este correo. El proveedor puede iniciar sesión directamente sin necesitar esta invitación.',
+                    'code' => 'EMAIL_HAS_ACCOUNT',
+                    'existing_account' => [
+                        'name' => $existingUser->name,
+                        'is_active' => (bool) $existingUser->is_active,
+                    ],
+                ], 409);
+            }
+
             $invitation = ProviderInvitation::create([
                 'email' => $request->email,
                 'token' => ProviderInvitation::generateToken(),
@@ -62,11 +78,9 @@ class ProviderInvitationController extends Controller
                 'expires_at' => Carbon::now()->addDays(7),
             ]);
 
-            // Enviar email con el link de invitación
             try {
                 Mail::to($invitation->email)->send(new ProviderInvitationMail($invitation));
             } catch (\Exception $mailError) {
-                // Si falla el envío del email, marcar como fallida pero no detener el proceso
                 \Log::error('Error al enviar email de invitación: ' . $mailError->getMessage());
             }
 
@@ -83,9 +97,6 @@ class ProviderInvitationController extends Controller
         }
     }
 
-    /**
-     * Verificar invitación por token
-     */
     /**
      * Verificar invitación por token
      */
@@ -115,8 +126,11 @@ class ProviderInvitationController extends Controller
             ], 400);
         }
 
-        // ✅ Si ya existe un proveedor creado manualmente con este email,
-        // devolvemos sus datos para que el frontend pre-llene el formulario.
+        // ── Capa 2: si ya existe una cuenta (User) con login para este
+        // correo, lo decimos explícitamente para que el frontend muestre
+        // "ya tienes cuenta, inicia sesión" en vez del formulario completo.
+        $existingUser = User::where('email', $invitation->email)->first();
+
         $existingProvider = \App\Models\Provider::where('email', $invitation->email)->first();
 
         return response()->json([
@@ -126,7 +140,12 @@ class ProviderInvitationController extends Controller
                 'provider_type' => $invitation->providerType,
                 'expires_at' => $invitation->expires_at,
             ],
-            // ✅ NUEVO
+            // Ya hay cuenta con login — el frontend debe ofrecer
+            // "Iniciar sesión" / "Restablecer contraseña" en vez del form.
+            'existing_account' => $existingUser ? [
+                'name' => $existingUser->name,
+                'is_active' => (bool) $existingUser->is_active,
+            ] : null,
             'existing_provider' => $existingProvider ? [
                 'business_name'        => $existingProvider->business_name,
                 'rfc'                  => $existingProvider->rfc,
@@ -162,12 +181,10 @@ class ProviderInvitationController extends Controller
             ], 422);
         }
 
-        // Extender fecha de expiración
         $invitation->update([
             'expires_at' => Carbon::now()->addDays(7),
         ]);
 
-        // Reenviar email
         try {
             Mail::to($invitation->email)->send(new ProviderInvitationMail($invitation));
         } catch (\Exception $mailError) {
