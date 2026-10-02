@@ -52,4 +52,11 @@ return [
     'file_restlet_deploy_id' => env('NETSUITE_FILE_RESTLET_DEPLOY_ID'),
     ],
 
+    'company' => [
+        'rfc' => env('COMPANY_RFC'),
+        ],
+    'payment_complements' => [
+        'required_since' => env('PAYMENT_COMPLEMENT_REQUIRED_SINCE', '2026-06-01'),
+        ],
+
 ];

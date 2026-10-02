@@ -61,6 +61,11 @@ Schedule::command('netsuite:notify-overdue-invoices')
     ->weekdays()
     ->withoutOverlapping();
 
+Schedule::command('netsuite:link-invoice-submissions')
+    ->everyFourHours()
+    ->withoutOverlapping();
+
+
 // ALTERNATIVAS (comentadas - descomenta si prefieres usarlas):
 
 // Ejecutar cada 12 horas (8 AM y 8 PM)

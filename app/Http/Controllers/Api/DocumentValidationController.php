@@ -26,6 +26,11 @@ class DocumentValidationController extends Controller
         ])
         ->where('status', 'pending');
 
+        $allowedCategories = $this->allowedCategoriesForUser($request->user());
+        if ($allowedCategories !== null) {
+            $query->whereHas('documentType', fn ($q) => $q->whereIn('category', $allowedCategories));
+        }
+
         if ($request->has('search') && $request->search) {
             $search = $request->search;
             $query->whereHas('provider', function ($q) use ($search) {
@@ -99,6 +104,16 @@ class DocumentValidationController extends Controller
             $document = ProviderDocument::where('id', $documentId)
                 ->where('provider_id', $providerId)
                 ->firstOrFail();
+
+            $allowedCategories = $this->allowedCategoriesForUser($request->user());
+            if ($allowedCategories !== null) {
+                $document->loadMissing('documentType');
+                if (!in_array($document->documentType?->category, $allowedCategories, true)) {
+                    return response()->json([
+                        'message' => 'No tienes permiso para validar documentos fuera de tu alcance asignado.',
+                    ], 403);
+                }
+            }
 
             // ✅ Capturamos las fechas originales antes de sobreescribir, para
             // poder anotar en el historial si Calidad las corrigió.
@@ -286,4 +301,20 @@ class DocumentValidationController extends Controller
             ], 500);
         }
     }
+    private const FULL_ACCESS_VALIDATION_ROLES = ['super_admin', 'admin', 'calidad'];
+
+private function allowedCategoriesForUser($user): ?array
+{
+    $userRoles = $user->roles->pluck('name');
+
+    if ($userRoles->intersect(self::FULL_ACCESS_VALIDATION_ROLES)->isNotEmpty()) {
+        return null; // sin restricción
+    }
+
+    return \DB::table('role_document_scopes')
+        ->whereIn('role', $userRoles)
+        ->distinct()
+        ->pluck('category')
+        ->all();
+}
 }

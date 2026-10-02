@@ -11,9 +11,11 @@ use App\Http\Controllers\Api\DocumentTemplateController;
 use App\Http\Controllers\Api\DocumentTypeController;
 use App\Http\Controllers\Api\DocumentValidationController;
 use App\Http\Controllers\Api\FinanceAccountStatementController;
+use App\Http\Controllers\Api\InvoiceSubmissionController;
 use App\Http\Controllers\Api\MicrosoftAuthController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\PasswordResetController;
+use App\Http\Controllers\Api\PaymentComplementController;
 use App\Http\Controllers\Api\ProductsServicesCatalogController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\ProviderAccountController;
@@ -127,32 +129,44 @@ Route::middleware(['check.token.expiration', 'auth:sanctum'])->group(function ()
     Route::patch('/providers/{provider}/status', [ProviderController::class, 'updateStatus']);
 
     // Rutas específicas para proveedores
+        // Rutas específicas para proveedores
     Route::prefix('provider')->middleware('role:proveedor')->group(function () {
+
+        // ── Dashboard ──────────────────────────────────────────────────────
         Route::get('/dashboard/stats', [ProviderDashboardController::class, 'stats']);
+
+        // ── Documentos de cumplimiento ────────────────────────────────────
         Route::get('/documents', [ProviderDashboardController::class, 'documents']);
         Route::get('/documents/required', [ProviderDashboardController::class, 'requiredDocuments']);
         Route::get('/documents/expiring', [ProviderDashboardController::class, 'expiringDocuments']);
-        Route::get('/products-services-my', [ProviderDashboardController::class, 'myProductsServices']);
-        // Estado de cuenta (NetSuite)
-        Route::get('/account-statement', [ProviderAccountStatementController::class, 'index']);
-        Route::middleware('throttle:30,1')->group(function () {
-            Route::get('/netsuite-files/{type}/{id}', [ProviderAccountStatementController::class, 'downloadNetSuiteFile']);
-            Route::get('/credit-note-requests/{id}/file', [ProviderAccountStatementController::class, 'downloadMyCreditNoteFile']);
-            Route::get('/credit-note-requests/{id}/response-file', [ProviderAccountStatementController::class, 'downloadMyResponseFile']);
-        });
-        Route::post('/credit-note-requests/{id}/respond', [ProviderAccountStatementController::class, 'respondToCreditNoteRequest']);
-        Route::get('/invoices/{id}/timeline', [ProviderAccountStatementController::class, 'invoiceTimeline']);
-
-        Route::get('/payments/{id}/related-invoices', [ProviderAccountStatementController::class, 'paymentRelatedInvoices']);
-        Route::get('/credit-memos/{id}/related-invoices', [ProviderAccountStatementController::class, 'creditMemoRelatedInvoices']);
-        Route::get('/account-statement/export', [ProviderAccountStatementController::class, 'exportExcel']);
-
-        // Upload
         Route::post('/documents/upload', [ProviderDocumentUploadController::class, 'upload']);
         Route::delete('/documents/{id}', [ProviderDocumentUploadController::class, 'delete']);
         Route::get('/documents/{id}/download', [ProviderDocumentUploadController::class, 'download']);
 
-        // Perfil
+        // ── Estado de cuenta (NetSuite) ────────────────────────────────────
+        Route::get('/account-statement', [ProviderAccountStatementController::class, 'index']);
+        Route::get('/account-statement/export', [ProviderAccountStatementController::class, 'exportExcel']);
+        Route::get('/invoices/{id}/timeline', [ProviderAccountStatementController::class, 'invoiceTimeline']);
+        Route::get('/payments/{id}/related-invoices', [ProviderAccountStatementController::class, 'paymentRelatedInvoices']);
+        Route::get('/credit-memos/{id}/related-invoices', [ProviderAccountStatementController::class, 'creditMemoRelatedInvoices']);
+        Route::post('/credit-note-requests/{id}/respond', [ProviderAccountStatementController::class, 'respondToCreditNoteRequest']);
+
+        // ── Facturas subidas por el proveedor (PDF + XML) ──────────────────
+        Route::get('/invoice-submissions', [InvoiceSubmissionController::class, 'providerIndex']);
+        Route::post('/invoice-submissions', [InvoiceSubmissionController::class, 'providerStore']);
+        Route::get('/payment-complements', [PaymentComplementController::class, 'providerIndex']);
+        Route::post('/payment-complements', [PaymentComplementController::class, 'providerStore']);
+
+        // ── Descargas de archivos — agrupadas bajo throttle ────────────────
+        Route::middleware('throttle:30,1')->group(function () {
+            Route::get('/netsuite-files/{type}/{id}', [ProviderAccountStatementController::class, 'downloadNetSuiteFile']);
+            Route::get('/credit-note-requests/{id}/file', [ProviderAccountStatementController::class, 'downloadMyCreditNoteFile']);
+            Route::get('/credit-note-requests/{id}/response-file', [ProviderAccountStatementController::class, 'downloadMyResponseFile']);
+            Route::get('/invoice-submissions/{id}/file/{kind}', [InvoiceSubmissionController::class, 'providerDownload']);
+            Route::get('/payment-complements/{id}/file/{kind}', [PaymentComplementController::class, 'providerDownload']);
+        });
+
+        // ── Perfil ──────────────────────────────────────────────────────────
         Route::get('/profile', [ProviderProfileController::class, 'show']);
         Route::put('/profile', [ProviderProfileController::class, 'update']);
 
@@ -171,18 +185,19 @@ Route::middleware(['check.token.expiration', 'auth:sanctum'])->group(function ()
         Route::post('/personnel', [ProviderProfileController::class, 'storePersonnel']);
         Route::delete('/personnel/{id}', [ProviderProfileController::class, 'deletePersonnel']);
 
-        // Certificaciones
-        Route::get('/certifications',                        [ProviderCertificationController::class, 'myIndex']);
-        Route::post('/certifications',                       [ProviderCertificationController::class, 'myStore']);
-        Route::put('/certifications/{certification}',        [ProviderCertificationController::class, 'myUpdate']);
-        Route::delete('/certifications/{certification}',     [ProviderCertificationController::class, 'myDestroy']);
-        Route::get('/certifications/{certification}/download',[ProviderCertificationController::class, 'myDownload']);
+        // ── Certificaciones ─────────────────────────────────────────────────
+        Route::get('/certifications', [ProviderCertificationController::class, 'myIndex']);
+        Route::post('/certifications', [ProviderCertificationController::class, 'myStore']);
+        Route::put('/certifications/{certification}', [ProviderCertificationController::class, 'myUpdate']);
+        Route::delete('/certifications/{certification}', [ProviderCertificationController::class, 'myDestroy']);
+        Route::get('/certifications/{certification}/download', [ProviderCertificationController::class, 'myDownload']);
 
-        // Citas proveedor
+        // ── Citas ───────────────────────────────────────────────────────────
         Route::get('/appointments', [AppointmentController::class, 'myIndex']);
         Route::post('/appointments/{appointmentId}/complete', [AppointmentController::class, 'providerComplete']);
 
-        // Catálogo proveedor
+        // ── Catálogo de productos/servicios ─────────────────────────────────
+        Route::get('/products-services-my', [ProviderDashboardController::class, 'myProductsServices']);
         Route::get('/products-services', [ProductsServicesCatalogController::class, 'providerGetCatalog']);
         Route::put('/products-services', [ProductsServicesCatalogController::class, 'providerUpdateSelection']);
     });
@@ -222,13 +237,7 @@ Route::middleware(['check.token.expiration', 'auth:sanctum'])->group(function ()
     Route::delete('/providers/{provider}/documents/{document}', [ProviderDocumentController::class, 'destroy']);
     Route::get('/provider-types/{providerType}/all-documents', [ProviderTypeController::class, 'allDocuments']);
 
-    // ===============================
-    // VALIDACIÓN DE DOCUMENTOS
-    // ===============================
-    Route::middleware(['role:super_admin,admin,calidad'])->group(function () {
-        Route::get('/documents/pending', [DocumentValidationController::class, 'pending']);
-        Route::post('/providers/{provider}/documents/{document}/validate', [DocumentValidationController::class, 'validate']);
-    });
+    
 
     // ===============================
     // GESTIÓN DE TIPOS DE DOCUMENTOS (Calidad + Admin)
@@ -319,9 +328,13 @@ Route::get('/document-templates/generic/{documentTypeId}', [DocumentTemplateCont
     // ===============================
     // ESTADO DOCUMENTAL
     // ===============================
-    Route::middleware(['role:super_admin,admin,compras,calidad'])->group(function () {
-        Route::get('/documents/status', [DocumentStatusController::class, 'index']);
+    Route::middleware(['role:super_admin,admin,compras,calidad,cuentas_por_pagar'])->group(function () {
+    Route::get('/documents/status', [DocumentStatusController::class, 'index']);
     });
+    Route::middleware(['role:super_admin,admin,calidad,cuentas_por_pagar'])->group(function () {
+    Route::get('/documents/pending', [DocumentValidationController::class, 'pending']);
+    Route::post('/providers/{provider}/documents/{document}/validate', [DocumentValidationController::class, 'validate']);
+});
 
     // ===============================
     // CITAS (CALENDARIO)
@@ -417,7 +430,7 @@ Route::get('/document-templates/generic/{documentTypeId}', [DocumentTemplateCont
         // ===============================
     // ESTADO DE CUENTA — COMPRAS/FINANZAS
     // ===============================
-    Route::middleware(['role:super_admin,admin,compras,finanzas'])->prefix('finance')->group(function () {
+    Route::middleware(['role:super_admin,admin,compras,finanzas,cuentas_por_pagar,ingeniero_alimentos'])->prefix('finance')->group(function () {
         Route::get('/account-statement', [FinanceAccountStatementController::class, 'index']);
         Route::get('/credit-note-requests', [FinanceAccountStatementController::class, 'creditNoteRequests']);
         Route::patch('/credit-note-requests/{id}/review', [FinanceAccountStatementController::class, 'reviewCreditNoteRequest']);
@@ -434,6 +447,14 @@ Route::get('/document-templates/generic/{documentTypeId}', [DocumentTemplateCont
             Route::get('/credit-note-requests/{id}/file', [FinanceAccountStatementController::class, 'downloadCreditNoteFile']);
             Route::get('/credit-note-requests/{id}/response-file', [FinanceAccountStatementController::class, 'downloadProviderResponseFile']);
         });
+
+        Route::get('/invoice-submissions', [InvoiceSubmissionController::class, 'financeIndex']);
+        Route::patch('/invoice-submissions/{id}/review', [InvoiceSubmissionController::class, 'financeReview']);
+        Route::middleware('throttle:30,1')->get('/invoice-submissions/{id}/file/{kind}', [InvoiceSubmissionController::class, 'financeDownload']);
+        Route::middleware('throttle:10,1')->post('/providers/{id}/sync-now', [FinanceAccountStatementController::class, 'syncProviderNow']);
+        Route::get('/payment-complements', [PaymentComplementController::class, 'financeIndex']);
+        Route::patch('/payment-complements/{id}/review', [PaymentComplementController::class, 'financeReview']);
+        Route::middleware('throttle:30,1')->get('/payment-complements/{id}/file/{kind}', [PaymentComplementController::class, 'financeDownload']);
     });
 });
 

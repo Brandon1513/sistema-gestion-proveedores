@@ -299,4 +299,41 @@ protected function suiteqlPaged(string $query, int $limit, int $offset): array
         $query = "SELECT previousdoc FROM PreviousTransactionLineLink WHERE nextdoc = {$transactionInternalId}";
         return $this->suiteql($query);
     }
+
+    /**
+ * Trae facturas de compra con UUID fiscal capturado, modificadas desde
+ * una fecha dada. Se usa para enlazar automáticamente con las facturas
+ * que los proveedores suben a SGP.
+ */
+public function getVendorBillsWithUuidSince(string $sinceDate): array
+{
+    $query = "SELECT id, tranid, custbody_ent_entloc_uuid AS uuid, lastmodifieddate
+              FROM transaction
+              WHERE type = 'VendBill'
+                AND custbody_ent_entloc_uuid IS NOT NULL
+                AND lastmodifieddate >= TO_DATE('{$sinceDate}', 'YYYY-MM-DD')
+              ORDER BY id";
+
+    $all = [];
+    $offset = 0;
+    $pageSize = 1000;
+    $maxIterations = 50;
+    $iteration = 0;
+
+    do {
+        $iteration++;
+        if ($iteration > $maxIterations) {
+            Log::error('getVendorBillsWithUuidSince: tope de iteraciones alcanzado', [
+                'total_acumulado' => count($all),
+            ]);
+            break;
+        }
+
+        [$page, $hasMore] = $this->suiteqlPaged($query, $pageSize, $offset);
+        $all = array_merge($all, $page);
+        $offset += $pageSize;
+    } while ($hasMore);
+
+    return $all;
+}
 }
