@@ -32,6 +32,7 @@ use App\Http\Controllers\Api\ProviderTypeController;
 use App\Http\Controllers\Api\ProviderVehicleController;
 use App\Http\Controllers\Api\QualityDashboardController;
 use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\SyncHealthController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -50,6 +51,9 @@ Route::get('/invitations/verify/{token}', [ProviderInvitationController::class, 
 
 Route::post('/auth/microsoft/exchange', [MicrosoftAuthController::class, 'exchange']);
 
+// Monitor externo del planificador: protegido con token (responde 404 sin él)
+Route::get('/health/scheduler', [SyncHealthController::class, 'publicCheck'])->middleware('throttle:30,1');
+
 // Esta ruta maneja su propia autenticación mediante el token en query parameter
 Route::get('/providers/{provider}/documents/{document}/view', [ProviderDocumentController::class, 'view'])
     ->name('providers.documents.view');
@@ -57,33 +61,32 @@ Route::get('/providers/{provider}/documents/{document}/view', [ProviderDocumentC
 // Rutas protegidas por autenticación
 Route::middleware(['check.token.expiration', 'auth:sanctum'])->group(function () {
 
-        // ===============================
+    // ===============================
     // DEPARTAMENTOS
     // ===============================
     Route::get('/departments', [DepartmentController::class, 'index']); // lectura: todos los roles autenticados
-    
+
     Route::middleware(['role:super_admin,admin'])->group(function () {
-        Route::post('/departments',           [DepartmentController::class, 'store']);
+        Route::post('/departments',             [DepartmentController::class, 'store']);
         Route::put('/departments/{department}', [DepartmentController::class, 'update']);
     });
-    
+
     // ===============================
     // SOLICITUDES DE ALTA DE PROVEEDOR
     // ===============================
-    
+
     // emp_solicitante: crear y ver solo las suyas
     Route::middleware(['role:emp_solicitante,super_admin,admin,compras'])->group(function () {
-        Route::post('/provider-requests',          [ProviderRequestController::class, 'store']);
-        Route::get('/provider-requests/mine',      [ProviderRequestController::class, 'myIndex']);
+        Route::post('/provider-requests',     [ProviderRequestController::class, 'store']);
+        Route::get('/provider-requests/mine', [ProviderRequestController::class, 'myIndex']);
     });
-    
+
     // Compras/Admin: ver todas, aprobar (envía invitación), rechazar
     Route::middleware(['role:super_admin,admin,compras'])->group(function () {
-        Route::get('/provider-requests',                    [ProviderRequestController::class, 'index']);
+        Route::get('/provider-requests',                            [ProviderRequestController::class, 'index']);
         Route::post('/provider-requests/{providerRequest}/approve', [ProviderRequestController::class, 'approve']);
         Route::post('/provider-requests/{providerRequest}/reject',  [ProviderRequestController::class, 'reject']);
     });
-
 
     // ===============================
     // AUTH
@@ -129,7 +132,6 @@ Route::middleware(['check.token.expiration', 'auth:sanctum'])->group(function ()
     Route::patch('/providers/{provider}/status', [ProviderController::class, 'updateStatus']);
 
     // Rutas específicas para proveedores
-        // Rutas específicas para proveedores
     Route::prefix('provider')->middleware('role:proveedor')->group(function () {
 
         // ── Dashboard ──────────────────────────────────────────────────────
@@ -202,7 +204,6 @@ Route::middleware(['check.token.expiration', 'auth:sanctum'])->group(function ()
         Route::put('/products-services', [ProductsServicesCatalogController::class, 'providerUpdateSelection']);
     });
 
-
     // Vista global certificaciones
     Route::get('/certifications', [ProviderCertificationController::class, 'globalIndex']);
     Route::get('/certifications/pending-count', [ProviderCertificationController::class, 'pendingCount']);
@@ -237,21 +238,19 @@ Route::middleware(['check.token.expiration', 'auth:sanctum'])->group(function ()
     Route::delete('/providers/{provider}/documents/{document}', [ProviderDocumentController::class, 'destroy']);
     Route::get('/provider-types/{providerType}/all-documents', [ProviderTypeController::class, 'allDocuments']);
 
-    
-
     // ===============================
     // GESTIÓN DE TIPOS DE DOCUMENTOS (Calidad + Admin)
     // ── Estáticas primero para evitar conflictos con {id} ──
     // ===============================
     Route::middleware(['role:calidad,super_admin,admin'])->group(function () {
         // Sin parámetros
-        Route::get('/document-types',                       [DocumentTypeController::class, 'index']);
-        Route::post('/document-types',                      [DocumentTypeController::class, 'store']);
-        Route::post('/document-types/reorder',              [DocumentTypeController::class, 'reorder']);
-        Route::get('/document-types/provider-types',        [DocumentTypeController::class, 'providerTypes']);
-        Route::get('/document-types/groups',                [DocumentTypeController::class, 'getGroups']);
-        Route::post('/document-types/groups',               [DocumentTypeController::class, 'storeGroup']);
-        Route::post('/document-types/groups/reorder',       [DocumentTypeController::class, 'reorderGroups']);
+        Route::get('/document-types',                 [DocumentTypeController::class, 'index']);
+        Route::post('/document-types',                [DocumentTypeController::class, 'store']);
+        Route::post('/document-types/reorder',        [DocumentTypeController::class, 'reorder']);
+        Route::get('/document-types/provider-types',  [DocumentTypeController::class, 'providerTypes']);
+        Route::get('/document-types/groups',          [DocumentTypeController::class, 'getGroups']);
+        Route::post('/document-types/groups',         [DocumentTypeController::class, 'storeGroup']);
+        Route::post('/document-types/groups/reorder', [DocumentTypeController::class, 'reorderGroups']);
 
         // Con {id} — deben ir después de las estáticas
         Route::put('/document-types/{id}',                  [DocumentTypeController::class, 'update']);
@@ -263,34 +262,34 @@ Route::middleware(['check.token.expiration', 'auth:sanctum'])->group(function ()
 
     // ── Gestión de templates (Calidad + Admin) ────────────────────────────────────
     Route::middleware(['role:calidad,super_admin,admin,compras'])->group(function () {
-        Route::get('/document-templates',                  [App\Http\Controllers\Api\DocumentTemplateController::class, 'index']);
+        Route::get('/document-templates',                  [DocumentTemplateController::class, 'index']);
         Route::get('/document-templates/catalog-products', [DocumentTemplateController::class, 'getCatalogProducts']);
         Route::post('/document-templates/generic',         [DocumentTemplateController::class, 'storeGeneric']);
-        Route::post('/document-templates',                 [App\Http\Controllers\Api\DocumentTemplateController::class, 'store']);
-        Route::delete('/document-templates/{id}',          [App\Http\Controllers\Api\DocumentTemplateController::class, 'destroy']);
+        Route::post('/document-templates',                 [DocumentTemplateController::class, 'store']);
+        Route::delete('/document-templates/{id}',          [DocumentTemplateController::class, 'destroy']);
     });
 
-// ── Consulta de plantillas (cualquier usuario autenticado, incluyendo proveedor) ──
-Route::get('/document-templates/generic/{documentTypeId}', [DocumentTemplateController::class, 'getGenericTemplates']);
+    // ── Consulta de plantillas (cualquier usuario autenticado, incluyendo proveedor) ──
+    Route::get('/document-templates/generic/{documentTypeId}', [DocumentTemplateController::class, 'getGenericTemplates']);
 
     // ── Gestión de Tipos de Proveedor (CRUD completo) ─────────────────────────
     Route::middleware(['role:super_admin,admin,calidad'])->group(function () {
-        Route::post('/provider-types',                                          [ProviderTypeController::class, 'store']);
-        Route::put('/provider-types/{providerType}',                            [ProviderTypeController::class, 'update']);
-        Route::patch('/provider-types/{providerType}/toggle-active',            [ProviderTypeController::class, 'toggleActive']);
-        Route::delete('/provider-types/{providerType}',                         [ProviderTypeController::class, 'destroy']);
-        Route::get('/provider-types/{providerType}/documents',                  [ProviderTypeController::class, 'documents']);
-        Route::post('/provider-types/{providerType}/documents',                 [ProviderTypeController::class, 'assignDocument']);
+        Route::post('/provider-types',                                                   [ProviderTypeController::class, 'store']);
+        Route::put('/provider-types/{providerType}',                                     [ProviderTypeController::class, 'update']);
+        Route::patch('/provider-types/{providerType}/toggle-active',                     [ProviderTypeController::class, 'toggleActive']);
+        Route::delete('/provider-types/{providerType}',                                  [ProviderTypeController::class, 'destroy']);
+        Route::get('/provider-types/{providerType}/documents',                           [ProviderTypeController::class, 'documents']);
+        Route::post('/provider-types/{providerType}/documents',                          [ProviderTypeController::class, 'assignDocument']);
         Route::patch('/provider-types/{providerType}/documents/{docId}/toggle-required', [ProviderTypeController::class, 'toggleRequired']);
-        Route::delete('/provider-types/{providerType}/documents/{docId}',       [ProviderTypeController::class, 'removeDocument']);
-        Route::patch('/provider-types/{providerType}/documents/{docId}/persona', [ProviderTypeController::class, 'updateDocumentPersona']);
+        Route::delete('/provider-types/{providerType}/documents/{docId}',                [ProviderTypeController::class, 'removeDocument']);
+        Route::patch('/provider-types/{providerType}/documents/{docId}/persona',         [ProviderTypeController::class, 'updateDocumentPersona']);
     });
-    
+
     // ── Consulta de template por producto (todos los roles autenticados) ──────────
-    Route::get('/document-templates/by-product',   [App\Http\Controllers\Api\DocumentTemplateController::class, 'getByProduct']);
-    
+    Route::get('/document-templates/by-product', [DocumentTemplateController::class, 'getByProduct']);
+
     // ── Descarga de template (todos los roles autenticados, incluyendo proveedor) ─
-    Route::get('/document-templates/{id}/download', [App\Http\Controllers\Api\DocumentTemplateController::class, 'download']);
+    Route::get('/document-templates/{id}/download', [DocumentTemplateController::class, 'download']);
 
     // Historial de validaciones (control interno en el método)
     Route::get('/documents/{document}/history', [DocumentValidationController::class, 'history']);
@@ -329,12 +328,17 @@ Route::get('/document-templates/generic/{documentTypeId}', [DocumentTemplateCont
     // ESTADO DOCUMENTAL
     // ===============================
     Route::middleware(['role:super_admin,admin,compras,calidad,cuentas_por_pagar'])->group(function () {
-    Route::get('/documents/status', [DocumentStatusController::class, 'index']);
+        Route::get('/documents/status', [DocumentStatusController::class, 'index']);
     });
+
+    // ===============================
+    // VALIDACIÓN DE DOCUMENTOS
+    // (cuentas_por_pagar solo ve y valida la categoría fiscal; lo limita el controller)
+    // ===============================
     Route::middleware(['role:super_admin,admin,calidad,cuentas_por_pagar'])->group(function () {
-    Route::get('/documents/pending', [DocumentValidationController::class, 'pending']);
-    Route::post('/providers/{provider}/documents/{document}/validate', [DocumentValidationController::class, 'validate']);
-});
+        Route::get('/documents/pending', [DocumentValidationController::class, 'pending']);
+        Route::post('/providers/{provider}/documents/{document}/validate', [DocumentValidationController::class, 'validate']);
+    });
 
     // ===============================
     // CITAS (CALENDARIO)
@@ -402,7 +406,6 @@ Route::get('/document-templates/generic/{documentTypeId}', [DocumentTemplateCont
 
     Route::get('/providers/{id}/products-services', [ProductsServicesCatalogController::class, 'providerItems']);
 
-
     // ── Bloqueos de calendario ────────────────────────────────────────────────
     // Lectura: compras, seguridad, ingeniero_alimentos
     Route::middleware(['role:super_admin,admin,compras,seguridad,ingeniero_alimentos'])
@@ -410,24 +413,28 @@ Route::get('/document-templates/generic/{documentTypeId}', [DocumentTemplateCont
 
     // Escritura: solo compras y admin
     Route::middleware(['role:super_admin,admin,compras'])->group(function () {
-        Route::post('/calendar-blocks',                [CalendarBlockController::class, 'store']);
-        Route::put('/calendar-blocks/{calendarBlock}', [CalendarBlockController::class, 'update']);
+        Route::post('/calendar-blocks',                   [CalendarBlockController::class, 'store']);
+        Route::put('/calendar-blocks/{calendarBlock}',    [CalendarBlockController::class, 'update']);
         Route::delete('/calendar-blocks/{calendarBlock}', [CalendarBlockController::class, 'destroy']);
     });
 
-    //Notificaciones
+    // Notificaciones
     Route::get('/notifications',            [NotificationController::class, 'index']);
-    Route::post('/notifications/{id}/read',  [NotificationController::class, 'markRead']);
-    Route::post('/notifications/read-all',   [NotificationController::class, 'markAllRead']);
-    
-    //Reportes
-    Route::middleware(['role:super_admin,admin,calidad,compras,ingeniero_alimentos'])->group(function () {
-    Route::get('/reports/appointments/preview',          [ReportController::class, 'appointmentsPreview']);
-    Route::get('/reports/appointments/export',           [ReportController::class, 'appointmentsExport']);
-    Route::get('/reports/providers-compliance/preview',  [ReportController::class, 'providersCompliancePreview']); 
-    Route::get('/reports/providers-compliance/export',   [ReportController::class, 'providersComplianceExport']);  
+    Route::post('/notifications/{id}/read', [NotificationController::class, 'markRead']);
+    Route::post('/notifications/read-all',  [NotificationController::class, 'markAllRead']);
 
-        // ===============================
+    // ===============================
+    // REPORTES
+    // (este grupo se cierra aquí: antes envolvía por error al de Finanzas)
+    // ===============================
+    Route::middleware(['role:super_admin,admin,calidad,compras,ingeniero_alimentos'])->group(function () {
+        Route::get('/reports/appointments/preview',         [ReportController::class, 'appointmentsPreview']);
+        Route::get('/reports/appointments/export',          [ReportController::class, 'appointmentsExport']);
+        Route::get('/reports/providers-compliance/preview', [ReportController::class, 'providersCompliancePreview']);
+        Route::get('/reports/providers-compliance/export',  [ReportController::class, 'providersComplianceExport']);
+    });
+
+    // ===============================
     // ESTADO DE CUENTA — COMPRAS/FINANZAS
     // ===============================
     Route::middleware(['role:super_admin,admin,compras,finanzas,cuentas_por_pagar,ingeniero_alimentos'])->prefix('finance')->group(function () {
@@ -441,6 +448,7 @@ Route::get('/document-templates/generic/{documentTypeId}', [DocumentTemplateCont
         Route::get('/credit-memos/{id}/related-invoices', [FinanceAccountStatementController::class, 'creditMemoRelatedInvoices']);
         Route::get('/dashboard-kpis', [FinanceAccountStatementController::class, 'dashboardKpis']);
         Route::get('/account-statement/export', [FinanceAccountStatementController::class, 'exportExcel']);
+        Route::get('/sync-status', [SyncHealthController::class, 'finance']);
 
         Route::middleware('throttle:30,1')->group(function () {
             Route::get('/netsuite-files/{type}/{id}', [FinanceAccountStatementController::class, 'downloadNetSuiteFile']);
@@ -456,9 +464,4 @@ Route::get('/document-templates/generic/{documentTypeId}', [DocumentTemplateCont
         Route::patch('/payment-complements/{id}/review', [PaymentComplementController::class, 'financeReview']);
         Route::middleware('throttle:30,1')->get('/payment-complements/{id}/file/{kind}', [PaymentComplementController::class, 'financeDownload']);
     });
-});
-
-
-
-
 });
