@@ -48,10 +48,6 @@ Schedule::command('netsuite:reconcile-providers')
     ->withoutOverlapping()
     ->emailOutputOnFailure('brandon.devora@dasavena.com'); // opcional, o cámbialo por tu notificación preferida    
 
-Schedule::command('netsuite:reconcile-providers')
-    ->dailyAt('03:00')
-    ->withoutOverlapping();
-
 Schedule::command('netsuite:sync-vendor-data')
     ->everyFourHours()
     ->withoutOverlapping();
@@ -64,6 +60,10 @@ Schedule::command('netsuite:notify-overdue-invoices')
 Schedule::command('netsuite:link-invoice-submissions')
     ->everyFourHours()
     ->withoutOverlapping();
+Schedule::call(fn () => \Illuminate\Support\Facades\Cache::forever(
+    \App\Services\SyncHealth::HEARTBEAT_KEY,
+    now()->timestamp
+))->everyMinute()->name('scheduler-heartbeat');    
 
 
 // ALTERNATIVAS (comentadas - descomenta si prefieres usarlas):

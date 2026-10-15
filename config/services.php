@@ -58,5 +58,7 @@ return [
     'payment_complements' => [
         'required_since' => env('PAYMENT_COMPLEMENT_REQUIRED_SINCE', '2026-06-01'),
         ],
-
+    'health' => [
+    'token' => env('HEALTH_CHECK_TOKEN'),
+    ],
 ];

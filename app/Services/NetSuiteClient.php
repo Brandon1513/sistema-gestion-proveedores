@@ -5,6 +5,7 @@ namespace App\Services;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Http\Client\ConnectionException;
 
 class NetSuiteClient
 {
@@ -36,13 +37,8 @@ class NetSuiteClient
     public function suiteql(string $query): array
     {
         $url = "{$this->baseUrl}/query/v1/suiteql";
-        $method = 'POST';
 
-        $response = Http::withHeaders([
-            'Authorization' => $this->buildAuthHeader($url, $method),
-            'Content-Type'  => 'application/json',
-            'Prefer'        => 'transient',
-        ])->post($url, ['q' => $query]);
+        $response = $this->sendSigned('POST', $url, ['q' => $query]);
 
         if ($response->failed()) {
             throw new \RuntimeException(
@@ -100,12 +96,8 @@ class NetSuiteClient
         public function getRecord(string $recordType, string $id): array
         {
             $url = "{$this->baseUrl}/record/v1/{$recordType}/{$id}";
-            $method = 'GET';
 
-            $response = Http::withHeaders([
-                'Authorization' => $this->buildAuthHeader($url, $method),
-                'Content-Type'  => 'application/json',
-            ])->get($url);
+            $response = $this->sendSigned('GET', $url);
 
             if ($response->failed()) {
                 throw new \RuntimeException(
@@ -256,13 +248,8 @@ protected function paginatedTransactionQuery(string $type, array $columns, strin
 protected function suiteqlPaged(string $query, int $limit, int $offset): array
 {
     $url = "{$this->baseUrl}/query/v1/suiteql?limit={$limit}&offset={$offset}";
-    $method = 'POST';
 
-    $response = Http::withHeaders([
-        'Authorization' => $this->buildAuthHeader($url, $method),
-        'Content-Type'  => 'application/json',
-        'Prefer'        => 'transient',
-    ])->post($url, ['q' => $query]);
+    $response = $this->sendSigned('POST', $url, ['q' => $query]);
 
     if ($response->failed()) {
         throw new \RuntimeException("NetSuite SuiteQL falló ({$response->status()}): {$response->body()}");
@@ -335,5 +322,51 @@ public function getVendorBillsWithUuidSince(string $sinceDate): array
     } while ($hasMore);
 
     return $all;
+}
+/**
+ * Envía una petición firmada con reintentos ante fallas transitorias
+ * (timeout de conexión, 429, 502, 503, 504).
+ */
+protected function sendSigned(string $method, string $url, ?array $json = null, int $attempts = 3): \Illuminate\Http\Client\Response
+{
+    $lastException = null;
+
+    for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+        try {
+            $headers = [
+                'Authorization' => $this->buildAuthHeader($url, $method),
+                'Content-Type'  => 'application/json',
+            ];
+            if ($method === 'POST') {
+                $headers['Prefer'] = 'transient';
+            }
+
+            $request = Http::timeout(60)->connectTimeout(20)->withHeaders($headers);
+
+            $response = $method === 'POST'
+                ? $request->post($url, $json ?? [])
+                : $request->get($url);
+
+            if (in_array($response->status(), [429, 502, 503, 504], true) && $attempt < $attempts) {
+                Log::warning('NetSuite respondió con error transitorio, reintentando', [
+                    'status' => $response->status(), 'attempt' => $attempt, 'url' => strtok($url, '?'),
+                ]);
+                sleep($attempt * 3);
+                continue;
+            }
+
+            return $response;
+        } catch (ConnectionException $e) {
+            $lastException = $e;
+            Log::warning('NetSuite: falla de conexión, reintentando', [
+                'attempt' => $attempt, 'url' => strtok($url, '?'), 'error' => $e->getMessage(),
+            ]);
+            if ($attempt < $attempts) {
+                sleep($attempt * 3);
+            }
+        }
+    }
+
+    throw $lastException;
 }
 }
