@@ -22,13 +22,14 @@ use PhpOffice\PhpSpreadsheet\Style\Border;
 use Illuminate\Support\Facades\Log;
 use App\Models\ProviderInvoiceSubmission;
 use App\Models\ProviderPaymentComplement;
+use Illuminate\Support\Facades\DB;
 
 
 
 
 class ProviderAccountStatementController extends Controller
 {
-    private const COMPLEMENT_REQUIRED_SINCE = '2026-06-01';
+    
     /**
      * Resuelve el Provider ligado al usuario autenticado (mismo patrón
      * que el resto del portal proveedor: match por email).
@@ -268,9 +269,11 @@ class ProviderAccountStatementController extends Controller
     ) {
         $paymentIds = $appliedPayments->pluck('id');
 
-        $approvedComplements = ProviderPaymentComplement::whereIn('netsuite_vendor_payment_id', $paymentIds)
-            ->where('status', ProviderPaymentComplement::STATUS_APPROVED)
-            ->pluck('netsuite_vendor_payment_id');
+        $approvedComplements = DB::table('provider_payment_complement_payments as pcp')
+            ->join('provider_payment_complements as c', 'c.id', '=', 'pcp.complement_id')
+            ->whereIn('pcp.netsuite_vendor_payment_id', $paymentIds)
+            ->where('c.status', ProviderPaymentComplement::STATUS_APPROVED)
+            ->pluck('pcp.netsuite_vendor_payment_id');
 
         $missing = $paymentIds->diff($approvedComplements);
 

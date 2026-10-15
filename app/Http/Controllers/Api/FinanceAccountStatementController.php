@@ -27,7 +27,7 @@ use App\Models\ProviderPaymentComplement;
 
 class FinanceAccountStatementController extends Controller
 {
-    private const COMPLEMENT_REQUIRED_SINCE = '2026-06-01';
+    
     /**
      * Vista global de facturas, pagos y notas de crédito, filtrable
      * por proveedor. Para Compras/Finanzas — ven todos los proveedores,
@@ -319,9 +319,11 @@ class FinanceAccountStatementController extends Controller
     ) {
         $paymentIds = $appliedPayments->pluck('id');
 
-        $approvedComplements = ProviderPaymentComplement::whereIn('netsuite_vendor_payment_id', $paymentIds)
-            ->where('status', ProviderPaymentComplement::STATUS_APPROVED)
-            ->pluck('netsuite_vendor_payment_id');
+        $approvedComplements = DB::table('provider_payment_complement_payments as pcp')
+            ->join('provider_payment_complements as c', 'c.id', '=', 'pcp.complement_id')
+            ->whereIn('pcp.netsuite_vendor_payment_id', $paymentIds)
+            ->where('c.status', ProviderPaymentComplement::STATUS_APPROVED)
+            ->pluck('pcp.netsuite_vendor_payment_id');
 
         $missing = $paymentIds->diff($approvedComplements);
 
