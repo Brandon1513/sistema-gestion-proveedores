@@ -32,7 +32,7 @@ class MicrosoftAuthController extends Controller
      */
     public function callback(Request $request): RedirectResponse
     {
-        $frontendUrl = rtrim(env('FRONTEND_URL', 'http://localhost:5173'), '/');
+        $frontendUrl = rtrim(config('app.frontend_url', 'http://localhost:5173'), '/');
 
         try {
             $microsoftUser = Socialite::driver('microsoft')->user();

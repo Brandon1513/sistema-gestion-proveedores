@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class ProviderPaymentComplement extends Model
 {
@@ -12,7 +13,7 @@ class ProviderPaymentComplement extends Model
     public const STATUS_REJECTED = 'rejected';
 
     protected $fillable = [
-        'provider_id', 'netsuite_vendor_payment_id', 'uploaded_by', 'uuid', 'issued_at',
+        'provider_id', 'uploaded_by', 'uuid', 'issued_at',
         'total', 'currency', 'issuer_rfc', 'receiver_rfc', 'pdf_path', 'xml_path',
         'status', 'reviewed_by', 'reviewed_at', 'review_notes',
     ];
@@ -33,9 +34,15 @@ class ProviderPaymentComplement extends Model
         return $this->belongsTo(Provider::class);
     }
 
-    public function payment(): BelongsTo
+    /** Pagos que ampara este complemento (puede ser más de uno). */
+    public function payments(): BelongsToMany
     {
-        return $this->belongsTo(NetsuiteVendorPayment::class, 'netsuite_vendor_payment_id');
+        return $this->belongsToMany(
+            NetsuiteVendorPayment::class,
+            'provider_payment_complement_payments',
+            'complement_id',
+            'netsuite_vendor_payment_id'
+        )->withPivot('is_active')->withTimestamps();
     }
 
     public function uploader(): BelongsTo

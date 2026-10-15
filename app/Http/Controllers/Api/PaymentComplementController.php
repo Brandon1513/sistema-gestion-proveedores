@@ -15,6 +15,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\DB;
 
 class PaymentComplementController extends Controller
 {
@@ -34,7 +35,7 @@ class PaymentComplementController extends Controller
         $provider = $this->currentProvider($request);
 
         $complements = ProviderPaymentComplement::where('provider_id', $provider->id)
-            ->with('payment:id,tran_id,amount')
+            ->with('payments:id,tran_id,amount')
             ->orderByDesc('created_at')
             ->get();
 
@@ -46,24 +47,30 @@ class PaymentComplementController extends Controller
         $provider = $this->currentProvider($request);
 
         $request->validate([
-            'netsuite_vendor_payment_id' => ['required', 'integer'],
+            'payment_ids'   => ['required', 'array', 'min:1', 'max:50'],
+            'payment_ids.*' => ['integer', 'distinct'],
             'pdf' => ['required', 'file', 'mimes:pdf', 'max:10240'],
             'xml' => ['required', 'file', 'extensions:xml', 'max:2048'],
         ]);
 
-        $payment = NetsuiteVendorPayment::where('provider_id', $provider->id)
-            ->find($request->netsuite_vendor_payment_id);
+        $paymentIds = collect($request->payment_ids)->map(fn ($id) => (int) $id)->unique()->values();
 
-        if (!$payment) {
-            return $this->cfdiError('PAYMENT_NOT_FOUND', 'No se encontró ese pago en tu cuenta.', 404);
+        $payments = NetsuiteVendorPayment::where('provider_id', $provider->id)
+            ->whereIn('id', $paymentIds)
+            ->get();
+
+        if ($payments->count() !== $paymentIds->count()) {
+            return $this->cfdiError('PAYMENT_NOT_FOUND', 'Alguno de los pagos seleccionados no existe en tu cuenta.', 404);
         }
 
-        $existing = ProviderPaymentComplement::where('netsuite_vendor_payment_id', $payment->id)
-            ->where('status', '!=', ProviderPaymentComplement::STATUS_REJECTED)
-            ->first();
+        $alreadyCovered = DB::table('provider_payment_complement_payments')
+            ->whereIn('netsuite_vendor_payment_id', $paymentIds)
+            ->where('is_active', true)
+            ->pluck('netsuite_vendor_payment_id');
 
-        if ($existing) {
-            return $this->cfdiError('COMPLEMENT_ALREADY_EXISTS', 'Este pago ya tiene un complemento subido.', 409);
+        if ($alreadyCovered->isNotEmpty()) {
+            $folios = $payments->whereIn('id', $alreadyCovered)->pluck('tran_id')->implode(', ');
+            return $this->cfdiError('COMPLEMENT_ALREADY_EXISTS', "Estos pagos ya tienen un complemento subido: {$folios}.", 409);
         }
 
         $pdfHeader = file_get_contents($request->file('pdf')->getRealPath(), false, null, 0, 5);
@@ -110,30 +117,38 @@ class PaymentComplementController extends Controller
         $xmlPath = $request->file('xml')->storeAs($dir, "{$cfdi['uuid']}_{$stamp}.xml", 'local');
 
         try {
-            $complement = ProviderPaymentComplement::create([
-                'provider_id' => $provider->id,
-                'netsuite_vendor_payment_id' => $payment->id,
-                'uploaded_by' => $request->user()->id,
-                'uuid' => $cfdi['uuid'],
-                'issued_at' => $cfdi['issued_at'],
-                'total' => $cfdi['total'] ?: null,
-                'currency' => $cfdi['currency'],
-                'issuer_rfc' => $cfdi['issuer_rfc'],
-                'receiver_rfc' => $cfdi['receiver_rfc'],
-                'pdf_path' => $pdfPath,
-                'xml_path' => $xmlPath,
-                'status' => ProviderPaymentComplement::STATUS_SUBMITTED,
-            ]);
+            $complement = DB::transaction(function () use ($provider, $request, $cfdi, $pdfPath, $xmlPath, $paymentIds) {
+                $complement = ProviderPaymentComplement::create([
+                    'provider_id' => $provider->id,
+                    'uploaded_by' => $request->user()->id,
+                    'uuid' => $cfdi['uuid'],
+                    'issued_at' => $cfdi['issued_at'],
+                    'total' => $cfdi['total'] ?: null,
+                    'currency' => $cfdi['currency'],
+                    'issuer_rfc' => $cfdi['issuer_rfc'],
+                    'receiver_rfc' => $cfdi['receiver_rfc'],
+                    'pdf_path' => $pdfPath,
+                    'xml_path' => $xmlPath,
+                    'status' => ProviderPaymentComplement::STATUS_SUBMITTED,
+                ]);
+
+                $complement->payments()->attach(
+                    $paymentIds->mapWithKeys(fn ($id) => [$id => ['is_active' => true]])->all()
+                );
+
+                return $complement;
+            });
         } catch (UniqueConstraintViolationException) {
+            // UUID repetido o un pago que se cubrió en paralelo: gana la primera subida
             Storage::disk('local')->delete([$pdfPath, $xmlPath]);
 
-            return $this->cfdiError('DUPLICATE_UUID', 'Este CFDI ya fue registrado en el sistema.', 409);
+            return $this->cfdiError('DUPLICATE_UUID', 'Este CFDI o alguno de estos pagos ya fue registrado.', 409);
         }
 
         Log::info('Complemento de pago subido por proveedor', [
             'complement_id' => $complement->id,
             'provider_id' => $provider->id,
-            'payment_id' => $payment->id,
+            'payment_ids' => $paymentIds->all(),
             'uuid' => $complement->uuid,
         ]);
 
@@ -141,7 +156,7 @@ class PaymentComplementController extends Controller
 
         return response()->json([
             'message' => 'Complemento de pago recibido correctamente',
-            'complement' => $complement,
+            'complement' => $complement->load('payments:id,tran_id,amount'),
         ], 201);
     }
 
@@ -166,11 +181,14 @@ class PaymentComplementController extends Controller
             'provider_id' => ['nullable', 'exists:providers,id'],
         ]);
 
-        $query = ProviderPaymentComplement::with(['provider:id,business_name,rfc', 'payment:id,tran_id,amount'])
+        $query = ProviderPaymentComplement::with(['provider:id,business_name,rfc', 'payments:id,tran_id,amount'])
             ->orderByDesc('created_at');
 
         if (!empty($validated['status'])) {
             $query->where('status', $validated['status']);
+        }
+        if (!empty($validated['provider_id'])) {
+            $query->where('provider_id', $validated['provider_id']);
         }
 
         return response()->json($query->paginate(200));
@@ -192,18 +210,27 @@ class PaymentComplementController extends Controller
             return response()->json(['message' => 'Este complemento ya fue revisado.'], 409);
         }
 
-        $complement->update([
-            'status' => $validated['status'],
-            'review_notes' => $validated['review_notes'] ?? null,
-            'reviewed_by' => $request->user()->id,
-            'reviewed_at' => now(),
-        ]);
+        DB::transaction(function () use ($complement, $validated, $request) {
+            $complement->update([
+                'status' => $validated['status'],
+                'review_notes' => $validated['review_notes'] ?? null,
+                'reviewed_by' => $request->user()->id,
+                'reviewed_at' => now(),
+            ]);
+
+            // Si se rechaza, sus pagos quedan libres para subir otro complemento
+            if ($validated['status'] === ProviderPaymentComplement::STATUS_REJECTED) {
+                DB::table('provider_payment_complement_payments')
+                    ->where('complement_id', $complement->id)
+                    ->update(['is_active' => false, 'updated_at' => now()]);
+            }
+        });
 
         $this->notifyProvider($complement, $validated['status']);
 
         return response()->json([
             'message' => 'Complemento actualizado',
-            'complement' => $complement->fresh(['provider:id,business_name,rfc', 'payment:id,tran_id,amount']),
+            'complement' => $complement->fresh(['provider:id,business_name,rfc', 'payments:id,tran_id,amount']),
         ]);
     }
 
