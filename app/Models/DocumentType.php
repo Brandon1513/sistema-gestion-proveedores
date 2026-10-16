@@ -27,6 +27,7 @@ class DocumentType extends Model
         'allowed_extensions',
         'max_file_size_mb',
         'is_product_specific',
+        'allows_change_requests',
     ];
 
     protected $casts = [
@@ -39,6 +40,7 @@ class DocumentType extends Model
         'expiry_months'      => 'integer',  // ✅ NUEVO
         'is_active'          => 'boolean',
         'is_product_specific' => 'boolean',
+        'allows_change_requests' => 'boolean',
     ];
 
     public function providerTypes(): BelongsToMany

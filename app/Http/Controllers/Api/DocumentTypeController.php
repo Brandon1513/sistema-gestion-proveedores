@@ -28,25 +28,26 @@ class DocumentTypeController extends Controller
                 ->map(function ($doc) use ($pt) {
                     $pivot = $doc->providerTypes->firstWhere('id', $pt->id)?->pivot;
                     return [
-                        'id'                  => $doc->id,
-                        'code'                => $doc->code,
-                        'name'                => $doc->name,
-                        'description'         => $doc->description,
-                        'category'            => $doc->category,
-                        'group_name'          => $doc->group_name,
-                        'sort_order'          => $doc->sort_order,
-                        'is_active'           => $doc->is_active,
-                        'requires_expiry'     => $doc->requires_expiry,
-                        'expiry_alert_days'   => $doc->expiry_alert_days,
-                        'allows_multiple'     => $doc->allows_multiple,
-                        'allowed_extensions'  => $doc->allowed_extensions,
-                        'max_file_size_mb'    => $doc->max_file_size_mb,
-                        'is_required'         => $pivot?->is_required ?? false,
-                        'pivot_sort_order'    => $pivot?->sort_order ?? 0,
-                        'applies_to_existing' => $pivot?->applies_to_existing ?? true,
-                        'expiry_months'       => $doc->expiry_months,
-                        'is_product_specific' => $doc->is_product_specific,
-                        'provider_types'      => $doc->providerTypes->map(fn($ptype) => [
+                        'id'                     => $doc->id,
+                        'code'                   => $doc->code,
+                        'name'                   => $doc->name,
+                        'description'            => $doc->description,
+                        'category'               => $doc->category,
+                        'group_name'             => $doc->group_name,
+                        'sort_order'             => $doc->sort_order,
+                        'is_active'              => $doc->is_active,
+                        'requires_expiry'        => $doc->requires_expiry,
+                        'expiry_alert_days'      => $doc->expiry_alert_days,
+                        'allows_multiple'        => $doc->allows_multiple,
+                        'allowed_extensions'     => $doc->allowed_extensions,
+                        'max_file_size_mb'       => $doc->max_file_size_mb,
+                        'is_required'            => $pivot?->is_required ?? false,
+                        'pivot_sort_order'       => $pivot?->sort_order ?? 0,
+                        'applies_to_existing'    => $pivot?->applies_to_existing ?? true,
+                        'expiry_months'          => $doc->expiry_months,
+                        'is_product_specific'    => $doc->is_product_specific,
+                        'allows_change_requests' => (bool) $doc->allows_change_requests, // ✅ NUEVO
+                        'provider_types'         => $doc->providerTypes->map(fn($ptype) => [
                             'id'   => $ptype->id,
                             'name' => $ptype->name,
                             'pivot' => [
@@ -88,22 +89,23 @@ class DocumentTypeController extends Controller
         }
 
         $validated = $request->validate([
-            'name'                => 'required|string|max:255',
-            'code'                => 'nullable|string|max:50|unique:document_types,code',
-            'description'         => 'nullable|string|max:1000',
-            'category'            => ['required', Rule::in(['fiscal', 'tecnico', 'legal', 'otro'])],
-            'group_name'          => 'nullable|string|max:100',
-            'requires_expiry'     => 'boolean',
-            'expiry_alert_days'   => 'nullable|integer|min:1|max:365',
-            'allows_multiple'     => 'boolean',
-            'allowed_extensions'  => 'nullable',
-            'max_file_size_mb'    => 'nullable|integer|min:1|max:100',
-            'provider_type_ids'   => 'nullable|array',
-            'provider_type_ids.*' => 'exists:provider_types,id',
-            'is_required_map'     => 'nullable|array',
-            'applies_to_existing' => 'boolean',
-            'expiry_months'       => 'nullable|integer|min:1|max:120',
-            'is_product_specific' => 'boolean',
+            'name'                   => 'required|string|max:255',
+            'code'                   => 'nullable|string|max:50|unique:document_types,code',
+            'description'            => 'nullable|string|max:1000',
+            'category'               => ['required', Rule::in(['fiscal', 'tecnico', 'legal', 'otro'])],
+            'group_name'             => 'nullable|string|max:100',
+            'requires_expiry'        => 'boolean',
+            'expiry_alert_days'      => 'nullable|integer|min:1|max:365',
+            'allows_multiple'        => 'boolean',
+            'allowed_extensions'     => 'nullable',
+            'max_file_size_mb'       => 'nullable|integer|min:1|max:100',
+            'provider_type_ids'      => 'nullable|array',
+            'provider_type_ids.*'    => 'exists:provider_types,id',
+            'is_required_map'        => 'nullable|array',
+            'applies_to_existing'    => 'boolean',
+            'expiry_months'          => 'nullable|integer|min:1|max:120',
+            'is_product_specific'    => 'boolean',
+            'allows_change_requests' => 'boolean', // ✅ NUEVO
         ]);
 
         // ✅ Auto-generar código único si no viene
@@ -135,7 +137,9 @@ class DocumentTypeController extends Controller
                 'is_active'          => true,
                 'is_required'        => false,
                 'expiry_months'      => $validated['expiry_months'] ?? null,
-                'is_product_specific' => $validated['is_product_specific'] ?? false,
+                'is_product_specific'    => $validated['is_product_specific'] ?? false,
+                // ✅ NUEVO — documento nuevo: si no viene, queda apagado
+                'allows_change_requests' => $validated['allows_change_requests'] ?? false,
             ]);
 
             if (!empty($validated['provider_type_ids'])) {
@@ -173,23 +177,24 @@ class DocumentTypeController extends Controller
         }
 
         $validated = $request->validate([
-            'name'                => 'required|string|max:255',
-            'code'                => ['nullable', 'string', 'max:50', Rule::unique('document_types', 'code')->ignore($id)],
-            'description'         => 'nullable|string|max:1000',
-            'category'            => ['required', Rule::in(['fiscal', 'tecnico', 'legal', 'otro'])],
-            'group_name'          => 'nullable|string|max:100',
-            'requires_expiry'     => 'boolean',
-            'expiry_alert_days'   => 'nullable|integer|min:1|max:365',
-            'allows_multiple'     => 'boolean',
-            'allowed_extensions'  => 'nullable',
-            'max_file_size_mb'    => 'nullable|integer|min:1|max:100',
-            'is_active'           => 'boolean',
-            'provider_type_ids'   => 'nullable|array',
-            'provider_type_ids.*' => 'exists:provider_types,id',
-            'is_required_map'     => 'nullable|array',
-            'applies_to_existing' => 'boolean',
-            'expiry_months'       => 'nullable|integer|min:1|max:120',
-            'is_product_specific' => 'boolean',
+            'name'                   => 'required|string|max:255',
+            'code'                   => ['nullable', 'string', 'max:50', Rule::unique('document_types', 'code')->ignore($id)],
+            'description'            => 'nullable|string|max:1000',
+            'category'               => ['required', Rule::in(['fiscal', 'tecnico', 'legal', 'otro'])],
+            'group_name'             => 'nullable|string|max:100',
+            'requires_expiry'        => 'boolean',
+            'expiry_alert_days'      => 'nullable|integer|min:1|max:365',
+            'allows_multiple'        => 'boolean',
+            'allowed_extensions'     => 'nullable',
+            'max_file_size_mb'       => 'nullable|integer|min:1|max:100',
+            'is_active'              => 'boolean',
+            'provider_type_ids'      => 'nullable|array',
+            'provider_type_ids.*'    => 'exists:provider_types,id',
+            'is_required_map'        => 'nullable|array',
+            'applies_to_existing'    => 'boolean',
+            'expiry_months'          => 'nullable|integer|min:1|max:120',
+            'is_product_specific'    => 'boolean',
+            'allows_change_requests' => 'boolean', // ✅ NUEVO
         ]);
 
         // ✅ Auto-generar código único si no viene (al actualizar)
@@ -203,9 +208,16 @@ class DocumentTypeController extends Controller
             $validated['code'] = $code;
         }
 
+        // ✅ NUEVO — la bandera solo se toca si viene en la petición. Así una
+        // edición desde un cliente que no la manda no apaga los convenios.
+        $extra = [];
+        if ($request->has('allows_change_requests')) {
+            $extra['allows_change_requests'] = (bool) $validated['allows_change_requests'];
+        }
+
         DB::beginTransaction();
         try {
-            $doc->update([
+            $doc->update(array_merge([
                 'name'               => $validated['name'],
                 'code'               => $validated['code'],
                 'description'        => $validated['description'] ?? null,
@@ -221,7 +233,7 @@ class DocumentTypeController extends Controller
                 'is_active'          => $validated['is_active'] ?? true,
                 'expiry_months'      => $validated['expiry_months'] ?? null,
                 'is_product_specific' => $validated['is_product_specific'] ?? false,
-            ]);
+            ], $extra));
 
             if (isset($validated['provider_type_ids'])) {
                 $pivotData = [];
