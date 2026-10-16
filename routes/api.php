@@ -35,6 +35,7 @@ use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\SyncHealthController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\DocumentChangeRequestController;
 
 /*
 |--------------------------------------------------------------------------
@@ -463,5 +464,23 @@ Route::middleware(['check.token.expiration', 'auth:sanctum'])->group(function ()
         Route::get('/payment-complements', [PaymentComplementController::class, 'financeIndex']);
         Route::patch('/payment-complements/{id}/review', [PaymentComplementController::class, 'financeReview']);
         Route::middleware('throttle:30,1')->get('/payment-complements/{id}/file/{kind}', [PaymentComplementController::class, 'financeDownload']);
+    });
+
+    // Proveedor
+    Route::middleware(['role:proveedor'])->prefix('provider/change-requests')->group(function () {
+        Route::get('/document-type/{documentTypeId}', [DocumentChangeRequestController::class, 'providerShow'])->whereNumber('documentTypeId');
+        Route::middleware('throttle:10,1')->post('/', [DocumentChangeRequestController::class, 'providerStore']);
+        Route::middleware('throttle:30,1')->get('/{id}/personalized', [DocumentChangeRequestController::class, 'providerDownloadPersonalized'])->whereNumber('id');
+    });
+
+    // Bandeja interna
+    Route::middleware(['role:super_admin,admin,cuentas_por_pagar'])->prefix('change-requests')->group(function () {
+        Route::get('/', [DocumentChangeRequestController::class, 'index']);
+        Route::get('/{id}', [DocumentChangeRequestController::class, 'show'])->whereNumber('id');
+        Route::post('/{id}/resolve', [DocumentChangeRequestController::class, 'resolve'])->whereNumber('id');
+        Route::middleware('throttle:60,1')->group(function () {
+            Route::get('/{id}/images/{imageId}', [DocumentChangeRequestController::class, 'downloadImage'])->whereNumber(['id', 'imageId']);
+            Route::get('/{id}/response-file', [DocumentChangeRequestController::class, 'downloadResponseFile'])->whereNumber('id');
+        });
     });
 });
