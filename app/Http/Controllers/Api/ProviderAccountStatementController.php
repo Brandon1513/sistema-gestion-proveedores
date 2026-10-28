@@ -178,6 +178,25 @@ class ProviderAccountStatementController extends Controller
     }
 
     /**
+     * Descarga del archivo adjunto de una solicitud de nota de crédito
+     * hecha a nombre del proveedor (el que subió Finanzas/Compras al crearla).
+     */
+    public function downloadMyCreditNoteFile(Request $request, int $id)
+    {
+        $provider = $this->currentProvider($request);
+
+        $creditNoteRequest = ProviderCreditNoteRequest::where('provider_id', $provider->id)
+            ->findOrFail($id);
+
+        if (!$creditNoteRequest->file_path
+            || !Storage::disk('local')->exists($creditNoteRequest->file_path)) {
+            abort(404, 'Esta solicitud no tiene archivo adjunto');
+        }
+
+        return Storage::disk('local')->download($creditNoteRequest->file_path);
+    }
+
+    /**
      * Descarga del CFDI que el propio proveedor subió (por si quiere
      * verificar qué archivo quedó guardado).
      */
