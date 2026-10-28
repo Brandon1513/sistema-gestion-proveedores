@@ -33,6 +33,15 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => CheckRole::class,
             'check.token.expiration' => CheckTokenExpiration::class,
         ]);
+
+        // ⚠️ Laravel reordena los middleware según su lista de prioridad, y
+        // Authenticate (auth:sanctum) está en ella: sin esto se ejecuta ANTES
+        // que CheckTokenExpiration sin importar el orden escrito en las rutas,
+        // actualiza last_used_at y la sesión nunca expira por inactividad.
+        $middleware->prependToPriorityList(
+            before: \Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests::class,
+            prepend: CheckTokenExpiration::class,
+        );
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //
