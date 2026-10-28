@@ -10,11 +10,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use App\Models\DocumentChangeRequest;
-use App\Models\User;
-use App\Mail\NewDocumentUploadedMail;
-use Carbon\Carbon;
-
 
 class ProviderDocumentController extends Controller
 {
@@ -189,6 +184,73 @@ class ProviderDocumentController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Descargar documento
+     */
+    public function download($providerId, $documentId)
+    {
+        try {
+            // ─── Un proveedor solo puede descargar documentos propios ─────────
+            // La ruta está abierta a cualquier usuario autenticado
+            $user = auth()->user();
+            if ($user && $user->hasRole('proveedor')) {
+                $ownProviderId = Provider::where('email', $user->email)->value('id');
+                if ((int) $ownProviderId !== (int) $providerId) {
+                    return response()->json(['message' => 'No autorizado'], 403);
+                }
+            }
+
+            $document = ProviderDocument::where('id', $documentId)
+                ->where('provider_id', $providerId)
+                ->firstOrFail();
+
+            if (!Storage::disk('documents')->exists($document->file_path)) {
+                return response()->json([
+                    'message'   => 'El archivo no existe en el servidor',
+                    'file_path' => $document->file_path,
+                ], 404);
+            }
+
+            $fileContents = Storage::disk('documents')->get($document->file_path);
+            $downloadName = $document->original_filename ?? basename($document->file_path);
+            $extension    = $document->file_extension ?? pathinfo($document->file_path, PATHINFO_EXTENSION);
+
+            $mimeTypes = [
+                'pdf'  => 'application/pdf',
+                'jpg'  => 'image/jpeg',
+                'jpeg' => 'image/jpeg',
+                'png'  => 'image/png',
+                'doc'  => 'application/msword',
+                'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'xls'  => 'application/vnd.ms-excel',
+                'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            ];
+
+            $mimeType = $mimeTypes[$extension] ?? 'application/octet-stream';
+
+            return response($fileContents)
+                ->header('Content-Type', $mimeType)
+                ->header('Content-Disposition', 'attachment; filename="' . $downloadName . '"')
+                ->header('Content-Length', strlen($fileContents))
+                ->header('Cache-Control', 'no-cache, no-store, must-revalidate')
+                ->header('Pragma', 'no-cache')
+                ->header('Expires', '0');
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'message'     => 'Documento no encontrado',
+                'provider_id' => $providerId,
+                'document_id' => $documentId,
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Error al descargar el documento',
+                'error'   => $e->getMessage(),
+            ], 500);
+        }
+    }
+
     /**
      * Ver documento en el navegador (vista previa)
      */
@@ -271,191 +333,4 @@ class ProviderDocumentController extends Controller
             ], 500);
         }
     }
-        /**
-     * Subir documento del proveedor
-     */
-    public function upload(Request $request): JsonResponse
-    {
-        $request->validate([
-            'document_type_id' => 'required|exists:document_types,id',
-            'file'             => 'required|file|max:10240',
-            'issue_date'       => 'nullable|date',
-            'expiry_date'      => 'nullable|date|after:issue_date',
-            'product_name'     => 'nullable|string|max:255',
-        ]);
- 
-        try {
-            $user = $request->user();
- 
-            $provider = Provider::where('email', $user->email)->first();
-            if (!$provider) {
-                return response()->json(['message' => 'Proveedor no encontrado'], 404);
-            }
- 
-            $documentType = DocumentType::findOrFail($request->document_type_id);
- 
-            // ✅ NUEVO: si el convenio tiene una solicitud de cambios abierta,
-            // no se acepta el documento firmado hasta que llegue la versión ajustada
-            if ($documentType->allows_change_requests) {
-                $hasPendingChange = DocumentChangeRequest::where('provider_id', $provider->id)
-                    ->where('document_type_id', $documentType->id)
-                    ->pending()
-                    ->exists();
- 
-                if ($hasPendingChange) {
-                    return response()->json([
-                        'message' => 'Tienes una solicitud de cambios en revisión para este convenio. Espera la versión ajustada antes de subirlo firmado.',
-                    ], 422);
-                }
-            }
- 
-            // ✅ Calcular expiry_date automáticamente si el tipo tiene expiry_months
-            $expiryDate = $request->expiry_date ?? null;
-            if ($documentType->expiry_months && $request->filled('issue_date')) {
-                $expiryDate = Carbon::parse($request->issue_date)
-                    ->addMonths($documentType->expiry_months)
-                    ->format('Y-m-d');
-            }
- 
-            // Procesar archivo
-            $file         = $request->file('file');
-            $originalName = $file->getClientOriginalName();
-            $extension    = $file->getClientOriginalExtension();
-            $fileName     = Str::slug($provider->business_name) . '_' .
-                            Str::slug($documentType->name) . '_' .
-                            time() . '.' . $extension;
- 
-            $path = $file->storeAs(
-                'providers/' . $provider->id . '/documents',
-                $fileName,
-                'documents'
-            );
- 
-            // ✅ Si el tipo permite múltiples archivos, siempre crear uno nuevo
-            // Si no permite múltiples, buscar el existente para reemplazarlo
-            $existingDocument = null;
-            if (!$documentType->allows_multiple) {
-                $existingDocument = ProviderDocument::where('provider_id', $provider->id)
-                    ->where('document_type_id', $request->document_type_id)
-                    ->first();
-            }
- 
-            if ($existingDocument) {
-                // Reemplazar documento único existente
-                if ($existingDocument->file_path) {
-                    Storage::disk('documents')->delete($existingDocument->file_path);
-                }
-                $existingDocument->update([
-                    'original_filename' => $originalName,
-                    'file_path'         => $path,
-                    'file_extension'    => $extension,
-                    'file_size_kb'      => (int) round($file->getSize() / 1024),
-                    'issue_date'        => $request->issue_date,
-                    'expiry_date'       => $expiryDate,
-                    'product_name'      => $request->product_name ?? null,
-                    'status'            => 'pending',
-                ]);
-                $document = $existingDocument;
-            } else {
-                // Crear nuevo documento (siempre para allows_multiple, o cuando no existe)
-                $document = ProviderDocument::create([
-                    'provider_id'       => $provider->id,
-                    'document_type_id'  => $request->document_type_id,
-                    'original_filename' => $originalName,
-                    'file_path'         => $path,
-                    'file_extension'    => $extension,
-                    'file_size_kb'      => (int) round($file->getSize() / 1024),
-                    'issue_date'        => $request->issue_date,
-                    'expiry_date'       => $expiryDate,
-                    'product_name'      => $request->product_name ?? null,
-                    'status'            => 'pending',
-                ]);
-            }
- 
-            $document->load('documentType');
- 
-            // Notificar a Calidad
-            try {
-                $recipients = User::role('calidad')->pluck('email')->toArray();
-                if (!empty($recipients)) {
-                    foreach ($recipients as $email) {
-                        Mail::to($email)->send(new NewDocumentUploadedMail($document));
-                    }
-                    \Log::info('Email de nuevo documento enviado a: ' . implode(', ', $recipients));
-                } else {
-                    \Log::warning('No hay usuarios de Calidad para notificar');
-                }
-            } catch (\Exception $e) {
-                \Log::error('Error al enviar email de nuevo documento: ' . $e->getMessage());
-            }
- 
-            return response()->json([
-                'message'  => 'Documento cargado exitosamente',
-                'document' => $document,
-            ], 201);
- 
-        } catch (\Exception $e) {
-            \Log::error('Error al subir documento: ' . $e->getMessage());
-            return response()->json([
-                'message' => 'Error al subir documento',
-                'error'   => $e->getMessage(),
-            ], 500);
-        }
-    }
-
-        /**
-     * Eliminar documento del proveedor
-     */
-    public function delete(Request $request, $documentId): JsonResponse
-    {
-        try {
-            $user     = $request->user();
-            $provider = Provider::where('email', $user->email)->first();
-            if (!$provider) return response()->json(['message' => 'Proveedor no encontrado'], 404);
- 
-            $document = ProviderDocument::where('id', $documentId)
-                ->where('provider_id', $provider->id)
-                ->firstOrFail();
- 
-            if ($document->status === 'approved') {
-                return response()->json(['message' => 'No se puede eliminar un documento aprobado'], 400);
-            }
- 
-            if ($document->file_path) {
-                Storage::disk('documents')->delete($document->file_path);
-            }
-            $document->delete();
- 
-            return response()->json(['message' => 'Documento eliminado exitosamente']);
- 
-        } catch (\Exception $e) {
-            return response()->json(['message' => 'Error al eliminar documento', 'error' => $e->getMessage()], 500);
-        }
-    }
-        /**
-     * Descargar documento
-     */
-    public function download(Request $request, $documentId): mixed
-    {
-        try {
-            $user     = $request->user();
-            $provider = Provider::where('email', $user->email)->first();
-            if (!$provider) return response()->json(['message' => 'Proveedor no encontrado'], 404);
- 
-            $document = ProviderDocument::where('id', $documentId)
-                ->where('provider_id', $provider->id)
-                ->firstOrFail();
- 
-            if (!Storage::disk('documents')->exists($document->file_path)) {
-                return response()->json(['message' => 'Archivo no encontrado'], 404);
-            }
- 
-            return Storage::disk('documents')->download($document->file_path, $document->original_filename);
- 
-        } catch (\Exception $e) {
-            return response()->json(['message' => 'Error al descargar documento', 'error' => $e->getMessage()], 500);
-        }
-    }
-
-
 }
