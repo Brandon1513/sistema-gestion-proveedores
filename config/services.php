@@ -61,4 +61,8 @@ return [
     'health' => [
     'token' => env('HEALTH_CHECK_TOKEN'),
     ],
+        'cron' => [
+        'token'      => env('CRON_TRIGGER_TOKEN'),
+        'php_binary' => env('CRON_PHP_BINARY', 'php'),
+    ],
 ];
