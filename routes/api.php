@@ -36,6 +36,7 @@ use App\Http\Controllers\Api\SyncHealthController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\DocumentChangeRequestController;
+use App\Http\Controllers\Api\CronTriggerController;
 
 /*
 |--------------------------------------------------------------------------
@@ -54,6 +55,9 @@ Route::post('/auth/microsoft/exchange', [MicrosoftAuthController::class, 'exchan
 
 // Monitor externo del planificador: protegido con token (responde 404 sin él)
 Route::get('/health/scheduler', [SyncHealthController::class, 'publicCheck'])->middleware('throttle:30,1');
+
+// Disparador del planificador (cron-job.org, cada minuto): protegido con token (404 sin él)
+Route::get('/cron/run', [CronTriggerController::class, 'run'])->middleware('throttle:10,1');
 
 // Esta ruta maneja su propia autenticación mediante el token en query parameter
 Route::get('/providers/{provider}/documents/{document}/view', [ProviderDocumentController::class, 'view'])

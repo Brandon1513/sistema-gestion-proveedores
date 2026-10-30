@@ -5,6 +5,7 @@ use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schedule;
+use Laravel\Sanctum\PersonalAccessToken;
 
 /*
 |--------------------------------------------------------------------------
@@ -26,16 +27,17 @@ Artisan::command('inspire', function () {
 // Task Scheduling
 // ---------------------------------------------------------------------------
 //
-// El cron del servidor ejecuta schedule:run cada 5 minutos:
-//   */5 * * * * cd /home/portalproveedores/public_html && php artisan schedule:run >> storage/logs/cron.log 2>&1
+// El planificador lo dispara cron-job.org CADA MINUTO llamando a:
+//   GET /api/cron/run   (header X-Cron-Token)
+// CronTriggerController lanza `php artisan schedule:run` en segundo plano
+// (salida en storage/logs/cron.log) y responde de inmediato.
 //
-// REGLAS PARA AGREGAR TAREAS:
-//  1. Programa SIEMPRE en minutos múltiplos de 5 (:05, :10, :25...). Una tarea
-//     en un minuto como :07 nunca correría, porque schedule:run solo se
-//     ejecuta en los múltiplos de 5.
-//  2. Evita el minuto :00. Algo en el hosting quita entradas del crontab al
-//     inicio de cada hora; ~/cron-guard.sh las repone en segundos, pero el
-//     disparo de las :00 puede perderse.
+// Ya NO se usa el crontab del servidor ni ~/cron-guard.sh: si se reactivan
+// junto con cron-job.org, las tareas sin withoutOverlapping() correrían dos
+// veces (p. ej. correos de vencimiento duplicados).
+//
+// Al disparar cada minuto, las tareas pueden programarse en cualquier minuto.
+// Las tareas largas deben llevar withoutOverlapping().
 
 // Latido del planificador: lo lee /api/health/scheduler (monitor externo).
 // Va primero para que ninguna tarea larga de este mismo disparo lo retrase.
@@ -77,6 +79,32 @@ Schedule::command('netsuite:link-invoice-submissions')
 Schedule::command('netsuite:notify-overdue-invoices')
     ->dailyAt('08:10')
     ->weekdays()
+    ->withoutOverlapping();
+
+// Worker de colas (QUEUE_CONNECTION=database): procesa los jobs pendientes,
+// p. ej. SendExpiringDocumentNotification. Se lanza cada minuto, se detiene
+// al vaciar la cola o a los 50 s, y no se enciman dos workers. El candado
+// expira a los 5 min por si un worker muere a medias.
+Schedule::command('queue:work --stop-when-empty --max-time=50 --tries=3')
+    ->everyMinute()
+    ->withoutOverlapping(5)
+    ->runInBackground();
+
+// Limpieza de tokens de sesión inactivos (mismo criterio que el middleware
+// CheckTokenExpiration). sanctum:prune-expired no sirve aquí: solo borra
+// tokens con expires_at o con 'expiration' configurado, y ambos están en null.
+Schedule::call(function () {
+    $limit = now()->subMinutes((int) config('sanctum.inactivity_expiration', 480));
+
+    PersonalAccessToken::where(function ($q) use ($limit) {
+        $q->where('last_used_at', '<', $limit)
+          ->orWhere(function ($q2) use ($limit) {
+              $q2->whereNull('last_used_at')->where('created_at', '<', $limit);
+          });
+    })->delete();
+})
+    ->dailyAt('02:15')
+    ->name('prune-inactive-tokens')
     ->withoutOverlapping();
 
 // ALTERNATIVAS (comentadas - descomenta si prefieres usarlas):
