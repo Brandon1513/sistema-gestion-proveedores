@@ -42,6 +42,14 @@ return [
         'tenant'        => env('AZURE_TENANT_ID'),
     ],
 
+    // Envío de correo con Microsoft Graph (app "SGP - Buzón", distinta a la del SSO)
+    'microsoft_graph' => [
+        'tenant_id'     => env('MS_GRAPH_TENANT_ID'),
+        'client_id'     => env('MS_GRAPH_CLIENT_ID'),
+        'client_secret' => env('MS_GRAPH_CLIENT_SECRET'),
+        'remitente'     => env('MS_GRAPH_REMITENTE', 'sgp@dasavena.com'),
+    ],
+
     'netsuite' => [
     'account_id'      => env('NETSUITE_ACCOUNT_ID'),
     'consumer_key'    => env('NETSUITE_CONSUMER_KEY'),
