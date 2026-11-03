@@ -378,6 +378,13 @@ Route::middleware(['check.token.expiration', 'auth:sanctum'])->group(function ()
         Route::get('/appointments', [AppointmentController::class, 'foodEngineerIndex']);
         Route::post('/appointments/{id}/reception', [AppointmentController::class, 'registerReception']);
     });
+        // ── Fotos de evidencia de recepción por ítem ──────────────────────────────
+    Route::middleware(['role:super_admin,admin,ingeniero_alimentos'])->group(function () {
+        Route::post('/appointment-items/{itemId}/photos', [AppointmentController::class, 'uploadItemPhotos'])->whereNumber('itemId');
+        Route::delete('/appointment-item-photos/{photoId}', [AppointmentController::class, 'deleteItemPhoto'])->whereNumber('photoId');
+    });
+    Route::middleware(['role:super_admin,admin,compras,calidad,ingeniero_alimentos,proveedor', 'throttle:120,1'])
+        ->get('/appointment-item-photos/{photoId}', [AppointmentController::class, 'showItemPhoto'])->whereNumber('photoId');
 
     // Config citas físicas
     Route::get('/appointments/{id}/physical-docs-config', [AppointmentController::class, 'getPhysicalDocsConfig']);

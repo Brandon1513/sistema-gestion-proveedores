@@ -5,10 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Appointment;
 use App\Models\AppointmentItem;
+use App\Models\AppointmentItemPhoto;
 use App\Models\ProductService;
 use App\Models\Provider;
 use App\Models\Unit;
 use App\Models\User;
+use App\Mail\ReceptionResultMail;
 use App\Services\NotificationDispatcher;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -51,6 +53,11 @@ class AppointmentController extends Controller
             'entryConfirmedBy:id,name',
             'receptionReviewedBy:id,name',
             'rescheduledFrom:id,appointment_date,appointment_time', // ✅ nuevo
+            // ✅ Ítems con resultado de recepción y fotos (evita una consulta por cita)
+            'items.productService:id,name,type',
+            'items.unit:id,name,abbreviation',
+            'items.receivedUnit:id,name,abbreviation',
+            'items.photos:id,appointment_item_id,original_name',
         ]);
 
         if ($request->filled('year') && $request->filled('month'))
@@ -175,6 +182,10 @@ class AppointmentController extends Controller
             'entryConfirmedBy:id,name',
             'receptionReviewedBy:id,name',
             'rescheduledFrom:id,appointment_date,appointment_time', // ✅ nuevo
+            'items.productService:id,name,type',
+            'items.unit:id,name,abbreviation',
+            'items.receivedUnit:id,name,abbreviation',
+            'items.photos:id,appointment_item_id,original_name',
         ]);
         return response()->json(['appointment' => $this->formatAppointment($appointment)]);
     }
@@ -264,7 +275,16 @@ class AppointmentController extends Controller
         $provider = Provider::where('email', $user->email)->first();
         if (!$provider) return response()->json(['message'=>'Proveedor no encontrado'], 404);
 
-        $base = Appointment::with(['scheduledBy:id,name','vehicle:id,brand_model,plates','personnel:id,full_name'])
+        // ✅ Ahora incluye los ítems con su resultado de recepción y fotos
+        $base = Appointment::with([
+                'scheduledBy:id,name',
+                'vehicle:id,brand_model,plates',
+                'personnel:id,full_name',
+                'items.productService:id,name,type',
+                'items.unit:id,name,abbreviation',
+                'items.receivedUnit:id,name,abbreviation',
+                'items.photos:id,appointment_item_id,original_name',
+            ])
             ->where('provider_id', $provider->id);
 
         $upcoming = (clone $base)->whereDate('appointment_date','>=',today())
@@ -273,9 +293,10 @@ class AppointmentController extends Controller
             $q->whereDate('appointment_date','<',today())->orWhere('status','cancelled');
         })->orderByDesc('appointment_date')->orderByDesc('appointment_time')->limit(20)->get();
 
+        // ✅ Formato propio del proveedor: sin notas internas de DASAVENA
         return response()->json([
-            'upcoming'       => $upcoming->map(fn($a) => $this->formatAppointment($a)),
-            'past'           => $past->map(fn($a) => $this->formatAppointment($a)),
+            'upcoming'       => $upcoming->map(fn($a) => $this->formatForProvider($a)),
+            'past'           => $past->map(fn($a) => $this->formatForProvider($a)),
             'total_upcoming' => $upcoming->count(),
         ]);
     }
@@ -306,7 +327,7 @@ class AppointmentController extends Controller
             'completed_by_provider_at' => now(),
         ]);
 
-        return response()->json(['message'=>'Información completada correctamente','appointment'=>$this->formatAppointment($appointment->fresh(['vehicle','personnel']))]);
+        return response()->json(['message'=>'Información completada correctamente','appointment'=>$this->formatForProvider($appointment->fresh(['vehicle','personnel']))]);
     }
 
     // ── Seguridad ─────────────────────────────────────────────────────────────
@@ -453,6 +474,7 @@ class AppointmentController extends Controller
             'items.productService:id,name,type',
             'items.unit:id,name,abbreviation',
             'items.receivedUnit:id,name,abbreviation',
+            'items.photos:id,appointment_item_id,original_name', // ✅ fotos de evidencia
         ];
  
         // ── Vista mes ─────────────────────────────────────────────
@@ -581,12 +603,55 @@ class AppointmentController extends Controller
             'items.*.received_unit_id'   => 'required_if:items.*.not_delivered,false|nullable|exists:units,id',
             'items.*.quantity_rejected'  => 'nullable|numeric|min:0',
             'items.*.rejection_reason'   => 'nullable|in:inocuidad,calidad',
-            'items.*.reception_notes'    => 'nullable|string|max:500',
+            'items.*.reception_notes'    => 'nullable|string|max:500',   // interna
+            'items.*.provider_notes'     => 'nullable|string|max:500',   // ✅ visible para el proveedor
+            // ✅ Condiciones de la entrega (checklist del ingeniero)
+            'delivery_conditions'          => 'required|array',
+            'delivery_conditions.*.key'    => 'required|string|in:' . implode(',', array_keys(Appointment::DELIVERY_CONDITIONS)),
+            'delivery_conditions.*.passed' => 'required|boolean',
+            'delivery_conditions.*.notes'  => 'nullable|string|max:500',
         ], [
+            'delivery_conditions.required'          => 'Evalúa las condiciones de la entrega',
+            'delivery_conditions.*.passed.required' => 'Indica si cada condición de la entrega cumple o no',
             'items.required'                        => 'Debes registrar al menos un ítem',
             'items.*.quantity_received.required_if' => 'La cantidad recibida es requerida',
             'items.*.received_unit_id.required_if'  => 'La unidad es requerida',
         ]);
+
+        // ✅ Condiciones de la entrega: los 4 rubros evaluados, y los que no cumplen con observación
+        $submittedConditions = collect($request->input('delivery_conditions', []))->keyBy('key');
+        $deliveryConditions  = [];
+        foreach (Appointment::DELIVERY_CONDITIONS as $key => $cfg) {
+            $c = $submittedConditions->get($key);
+            if (!$c || !array_key_exists('passed', $c)) {
+                return response()->json(['message' => "Falta evaluar: {$cfg['label']}"], 422);
+            }
+            $passed = filter_var($c['passed'], FILTER_VALIDATE_BOOLEAN);
+            $notes  = trim((string) ($c['notes'] ?? ''));
+            if (!$passed && $notes === '') {
+                return response()->json(['message' => "Escribe la observación de: {$cfg['label']}"], 422);
+            }
+            $deliveryConditions[] = [
+                'key'    => $key,
+                'label'  => $cfg['label'],
+                'passed' => $passed,
+                'notes'  => $passed ? null : $notes,
+            ];
+        }
+
+        // ✅ Un ítem con devolución necesita motivo y observaciones para el proveedor:
+        // es lo que el proveedor ve para entender por qué se le regresó producto.
+        foreach ($request->items as $itemData) {
+            if (!empty($itemData['not_delivered'])) continue;
+            if ((float) ($itemData['quantity_rejected'] ?? 0) <= 0) continue;
+
+            if (empty($itemData['rejection_reason'])) {
+                return response()->json(['message' => 'Los productos con devolución requieren el motivo del rechazo'], 422);
+            }
+            if (trim((string) ($itemData['provider_notes'] ?? '')) === '') {
+                return response()->json(['message' => 'Los productos con devolución requieren observaciones para el proveedor'], 422);
+            }
+        }
 
         foreach ($request->items as $itemData) {
             $item = AppointmentItem::find($itemData['id']);
@@ -604,6 +669,7 @@ class AppointmentController extends Controller
                     'reception_status'   => 'not_delivered',
                     'rejection_reason'   => null,
                     'reception_notes'    => $itemData['reception_notes'] ?? null,
+                    'provider_notes'     => $itemData['provider_notes'] ?? null,
                 ]);
                 continue;
             }
@@ -628,6 +694,7 @@ class AppointmentController extends Controller
                 'reception_status'   => $status,
                 'rejection_reason'   => $itemData['rejection_reason'] ?? null,
                 'reception_notes'    => $itemData['reception_notes'] ?? null,
+                'provider_notes'     => $itemData['provider_notes'] ?? null,
             ]);
         }
  
@@ -658,14 +725,118 @@ class AppointmentController extends Controller
             'reception_notes'       => $request->reception_notes ?? null,
             'reception_reviewed_by' => auth()->id(),
             'reception_reviewed_at' => now(),
+            'delivery_conditions'   => $deliveryConditions,
             'status'                => in_array($appointment->status, ['confirmed','scheduled']) ? 'completed' : $appointment->status,
         ]);
+
+        // ✅ Avisar al proveedor por correo si hubo devoluciones o alguna condición no cumplió
+        $hasReturns = $appointment->items()->where('quantity_rejected', '>', 0)->exists();
+        if ($hasReturns || $appointment->has_failed_conditions) {
+            $this->notifyReceptionResult($appointment);
+        }
  
         return response()->json([
             'message'     => 'Recepción registrada correctamente',
             'appointment' => $this->formatAppointment(
-                $appointment->fresh(['provider', 'items.productService', 'items.unit', 'items.receivedUnit', 'receptionReviewedBy'])
+                $appointment->fresh(['provider', 'items.productService', 'items.unit', 'items.receivedUnit', 'items.photos', 'receptionReviewedBy'])
             ),
+        ]);
+    }
+
+    // ── Fotos de evidencia por ítem ───────────────────────────────────────────
+
+    /**
+     * Sube fotos de evidencia a un ítem ya recibido (máx. AppointmentItem::MAX_PHOTOS).
+     * POST /api/appointment-items/{itemId}/photos  (multipart: photos[])
+     */
+    public function uploadItemPhotos(Request $request, $itemId): JsonResponse
+    {
+        $item = AppointmentItem::with('appointment')->findOrFail($itemId);
+
+        if ($item->appointment?->type !== 'entrega') {
+            return response()->json(['message' => 'Solo se pueden agregar fotos a entregas'], 422);
+        }
+        if ($item->reception_status === 'pending') {
+            return response()->json(['message' => 'Primero registra la recepción de este producto'], 422);
+        }
+
+        $request->validate([
+            'photos'   => 'required|array|min:1|max:' . AppointmentItem::MAX_PHOTOS,
+            'photos.*' => 'file|image|mimes:jpg,jpeg,png,webp|max:5120',
+        ], [
+            'photos.*.image' => 'Solo se permiten imágenes',
+            'photos.*.mimes' => 'Formatos permitidos: JPG, PNG o WEBP',
+            'photos.*.max'   => 'Cada foto debe pesar menos de 5 MB',
+        ]);
+
+        $current  = $item->photos()->count();
+        $incoming = count($request->file('photos'));
+        if ($current + $incoming > AppointmentItem::MAX_PHOTOS) {
+            $left = max(0, AppointmentItem::MAX_PHOTOS - $current);
+            return response()->json([
+                'message' => "Máximo " . AppointmentItem::MAX_PHOTOS . " fotos por producto. Puedes agregar {$left} más.",
+            ], 422);
+        }
+
+        foreach ($request->file('photos') as $file) {
+            $path = $file->store("appointments/{$item->appointment_id}/items/{$item->id}", 'documents');
+            $item->photos()->create([
+                'path'          => $path,
+                'original_name' => $file->getClientOriginalName(),
+                'size_kb'       => (int) round($file->getSize() / 1024),
+                'uploaded_by'   => auth()->id(),
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Fotos guardadas',
+            'photos'  => $item->photos()->get(['id', 'appointment_item_id', 'original_name']),
+        ], 201);
+    }
+
+    /**
+     * DELETE /api/appointment-item-photos/{photoId}
+     */
+    public function deleteItemPhoto($photoId): JsonResponse
+    {
+        $photo = AppointmentItemPhoto::findOrFail($photoId);
+
+        if ($photo->path && Storage::disk('documents')->exists($photo->path)) {
+            Storage::disk('documents')->delete($photo->path);
+        }
+        $photo->delete();
+
+        return response()->json(['message' => 'Foto eliminada']);
+    }
+
+    /**
+     * Muestra la foto (inline). Un proveedor solo ve fotos de sus propias citas
+     * y solo cuando la recepción ya está registrada.
+     * GET /api/appointment-item-photos/{photoId}
+     */
+    public function showItemPhoto(Request $request, $photoId)
+    {
+        $photo       = AppointmentItemPhoto::with('item.appointment')->findOrFail($photoId);
+        $appointment = $photo->item?->appointment;
+        $user        = $request->user();
+
+        if (!$appointment) {
+            return response()->json(['message' => 'Foto no encontrada'], 404);
+        }
+
+        if ($user->hasRole('proveedor')) {
+            $ownProviderId = Provider::where('email', $user->email)->value('id');
+            if ((int) $ownProviderId !== (int) $appointment->provider_id || !$appointment->is_reception_reviewed) {
+                return response()->json(['message' => 'No autorizado'], 403);
+            }
+        }
+
+        if (!Storage::disk('documents')->exists($photo->path)) {
+            return response()->json(['message' => 'El archivo no existe en el servidor'], 404);
+        }
+
+        return Storage::disk('documents')->response($photo->path, $photo->original_name, [
+            'Cache-Control' => 'private, max-age=3600',
         ]);
     }
 
@@ -701,6 +872,7 @@ class AppointmentController extends Controller
             // Seguridad
             'is_entry_confirmed'       => $a->is_entry_confirmed,
             'entry_confirmed_at'       => $a->entry_confirmed_at?->format('H:i'),
+            'entry_confirmed_by_name'  => $a->relationLoaded('entryConfirmedBy') ? $a->entryConfirmedBy?->name : null,
             'entry_notes'              => $a->entry_notes,
             'actual_arrival_time'      => $a->actual_arrival_time,
             'arrived_on_time'          => $a->arrived_on_time,
@@ -732,6 +904,9 @@ class AppointmentController extends Controller
             'unit'                     => $a->unit ? ['id'=>$a->unit->id,'name'=>$a->unit->name,'abbreviation'=>$a->unit->abbreviation] : null,
             'rejection_reason'         => $a->rejection_reason,
             'is_partial_rejection'     => $a->is_partial_rejection,
+            // ✅ Condiciones de la entrega (visible también para el proveedor)
+            'delivery_conditions'      => $a->delivery_conditions,
+            'has_failed_conditions'    => $a->has_failed_conditions,
             // ✅ ITEMS MÚLTIPLES
             'items'                    => $a->items ? $a->items->map(fn($item) => [
                 'id'                    => $item->id,
@@ -750,9 +925,53 @@ class AppointmentController extends Controller
                 'reception_status_label'=> $item->reception_status_label,
                 'rejection_reason'      => $item->rejection_reason,
                 'rejection_reason_label'=> $item->rejection_reason_label,
-                'reception_notes'       => $item->reception_notes,
+                'reception_notes'       => $item->reception_notes,   // interna
+                'provider_notes'        => $item->provider_notes,    // ✅ visible para el proveedor
+                // ✅ Fotos de evidencia (la imagen se pide a /api/appointment-item-photos/{id})
+                'photos'                => $item->relationLoaded('photos')
+                    ? $item->photos->map(fn($p) => ['id' => $p->id, 'original_name' => $p->original_name])->values()
+                    : [],
             ])->values() : [],
         ];
+    }
+
+    /**
+     * Formato para el portal del proveedor: el mismo de arriba pero SIN la
+     * información interna de DASAVENA (notas de recepción, de Seguridad,
+     * quién revisó). Antes myIndex enviaba todo esto aunque la pantalla no lo mostrara.
+     */
+    protected function formatForProvider(Appointment $a): array
+    {
+        $data = $this->formatAppointment($a);
+
+        unset(
+            $data['reception_notes'],
+            $data['reception_reviewed_by'],
+            $data['entry_confirmed_by_name'],
+            $data['entry_notes'],
+            $data['no_show_notes'],
+            $data['physical_docs_status'],
+        );
+
+        $reviewed = (bool) $a->is_reception_reviewed;
+
+        $data['items'] = collect($data['items'])->map(function ($item) use ($reviewed) {
+            unset($item['reception_notes']);
+
+            // Antes de registrar la recepción, el proveedor solo ve lo agendado
+            if (!$reviewed) {
+                unset(
+                    $item['quantity_received'], $item['quantity_rejected'], $item['quantity_accepted'],
+                    $item['received_unit'], $item['rejection_reason'], $item['rejection_reason_label'],
+                    $item['provider_notes'],
+                );
+                $item['photos'] = [];
+            }
+
+            return $item;
+        })->values();
+
+        return $data;
     }
 
     // ── MÉTODO: markNoShow (NUEVO) ────────────────────────────────────
@@ -837,6 +1056,26 @@ class AppointmentController extends Controller
             });
         } catch (\Exception $e) {
             Log::error('Error notificando cita al proveedor: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Correo al proveedor con el resultado de una recepción con devoluciones.
+     * Va en cola (lo envía el worker del scheduler) para no hacer esperar al ingeniero.
+     */
+    private function notifyReceptionResult(Appointment $appointment): void
+    {
+        try {
+            $appointment->loadMissing('provider');
+            $providerUser = $appointment->provider
+                ? User::where('email', $appointment->provider->email)->first()
+                : null;
+            if (!$providerUser) return;
+
+            Mail::to($providerUser->email, $providerUser->name)
+                ->queue(new ReceptionResultMail($appointment));
+        } catch (\Exception $e) {
+            Log::error('Error notificando resultado de recepción al proveedor: ' . $e->getMessage());
         }
     }
 
