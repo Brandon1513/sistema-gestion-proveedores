@@ -33,6 +33,10 @@ return [
     |            "postmark", "resend", "log", "array",
     |            "failover", "roundrobin"
     |
+    | "microsoft-graph" es nuestro: envía con la API de Microsoft desde el
+    | buzón compartido sgp@dasavena.com. Su transporte se registra en el
+    | AppServiceProvider (MAIL_MAILER=microsoft-graph).
+    |
     */
 
     'mailers' => [
@@ -47,6 +51,10 @@ return [
             'password' => env('MAIL_PASSWORD'),
             'timeout' => null,
             'local_domain' => env('MAIL_EHLO_DOMAIN', parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST)),
+        ],
+
+        'microsoft-graph' => [
+            'transport' => 'microsoft-graph',
         ],
 
         'ses' => [
