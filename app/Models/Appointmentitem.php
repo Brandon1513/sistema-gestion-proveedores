@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class AppointmentItem extends Model
 {
@@ -18,7 +19,8 @@ class AppointmentItem extends Model
         'received_unit_id',
         'reception_status',
         'rejection_reason',
-        'reception_notes',
+        'reception_notes',   // interna (solo DASAVENA)
+        'provider_notes',    // ✅ visible para el proveedor
         'not_delivered', 
     ];
 
@@ -28,6 +30,9 @@ class AppointmentItem extends Model
         'quantity_rejected' => 'decimal:2',
         'not_delivered'     => 'boolean', 
     ];
+
+    /** Máximo de fotos de evidencia por ítem */
+    const MAX_PHOTOS = 3;
 
     const REJECTION_REASONS = [
         'inocuidad' => 'Inocuidad',
@@ -60,6 +65,11 @@ class AppointmentItem extends Model
     public function receivedUnit(): BelongsTo
     {
         return $this->belongsTo(Unit::class, 'received_unit_id');
+    }
+
+    public function photos(): HasMany
+    {
+        return $this->hasMany(AppointmentItemPhoto::class)->orderBy('id');
     }
 
     // Cantidad aceptada = recibida - rechazada

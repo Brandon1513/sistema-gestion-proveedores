@@ -29,6 +29,7 @@ class Appointment extends Model
         'rejection_reason', 'is_partial_rejection',
         'rescheduled_from_id',
         'rescheduled_to_id',
+        'delivery_conditions', // ✅ checklist del ingeniero de alimentos
     ];
 
     protected $casts = [
@@ -40,6 +41,7 @@ class Appointment extends Model
         'no_show_at'               => 'datetime',
         'reception_photos'         => 'array',
         'physical_docs_status'     => 'array',
+        'delivery_conditions'      => 'array', // ✅
         'arrived_on_time'          => 'boolean',
         'has_missing_docs'         => 'boolean',
         'is_partial_rejection'     => 'boolean',
@@ -74,6 +76,17 @@ class Appointment extends Model
     const REJECTION_REASONS = [
         'inocuidad' => 'Inocuidad',
         'calidad'   => 'Calidad',
+    ];
+
+    /**
+     * ✅ Condiciones de la entrega que evalúa el ingeniero de alimentos al recibir.
+     * Mantener las mismas llaves en el front (FoodEngineerPage → DELIVERY_CONDITIONS).
+     */
+    const DELIVERY_CONDITIONS = [
+        'docs_complete'     => ['label' => 'Documentación completa',           'description' => 'Entregó toda la documentación en tiempo y forma'],
+        'docs_correct'      => ['label' => 'Documentación correcta',           'description' => 'No fue necesario solicitar correcciones a la documentación'],
+        'vehicle_condition' => ['label' => 'Condiciones de la unidad',         'description' => 'Unidad limpia, con lámina de cartón y en buen estado'],
+        'operator_attire'   => ['label' => 'Vestimenta adecuada del operador', 'description' => 'El operador porta la vestimenta requerida'],
     ];
 
     // ── Accessors ─────────────────────────────────────────────────────────────
@@ -132,6 +145,12 @@ class Appointment extends Model
     public function getIsNoShowAttribute(): bool
     {
         return $this->status === 'no_show';
+    }
+
+    /** ✅ true si algún rubro de las condiciones de la entrega no cumplió */
+    public function getHasFailedConditionsAttribute(): bool
+    {
+        return collect($this->delivery_conditions ?? [])->contains(fn ($c) => empty($c['passed']));
     }
 
     /**
