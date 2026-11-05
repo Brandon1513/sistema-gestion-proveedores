@@ -334,8 +334,9 @@
         <!-- Header dinámico según status -->
         <div class="{{ $status === 'approved' ? 'email-header-approved' : 'email-header-rejected' }}">
             <div class="logo-container">
-                <img src="{{ config('app.url') }}/images/logo.png" alt="DASAVENA Logo" class="logo">
-            </div>
+                @php($logoPath = public_path('images/logo.png'))
+                <img src="{{ isset($message) && is_file($logoPath) ? $message->embed($logoPath) : config('app.url').'/images/logo.png' }}" alt="DASAVENA" width="120" class="logo" style="display: block; margin: 0 auto; width: 120px; max-width: 120px; height: auto; border: 0;">
+                            </div>
             <h1>{{ $status === 'approved' ? '✅ Documento Aprobado' : '❌ Documento Rechazado' }}</h1>
             <p>Sistema de Gestión de Proveedores</p>
         </div>
@@ -352,7 +353,7 @@
             <p class="greeting">Estimado <strong>{{ $providerName }}</strong>,</p>
             
             <p class="message">
-                Su documento ha sido revisado y {{ $status === 'approved' ? '<strong>aprobado</strong>' : '<strong>rechazado</strong>' }} 
+                Su documento ha sido revisado y <strong>{{ $status === 'approved' ? 'aprobado' : 'rechazado' }}</strong>
                 por nuestro equipo de Control de Calidad.
             </p>
             

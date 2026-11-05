@@ -28,7 +28,8 @@ class NewDocumentUploadedMail extends Mailable
                 'providerName' => $this->provider->business_name,
                 'providerRFC' => $this->provider->rfc,
                 'documentType' => $this->document->documentType->name,
-                'fileName' => $this->document->file_name,
+                // La columna es original_filename (file_name no existe y siempre llegaba vacío)
+                'fileName' => $this->document->original_filename,
                 'uploadedAt' => $this->document->created_at->format('d/m/Y H:i'),
                 'validationUrl' => config('app.frontend_url') . '/documents/validation',
             ]);

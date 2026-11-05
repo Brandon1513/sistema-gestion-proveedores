@@ -44,6 +44,9 @@ class CreditNoteRequestNotification extends Notification
         ];
         $statusLabel = $statusLabels[$this->creditNoteRequest->status] ?? $this->creditNoteRequest->status;
 
+        // ✅ Link al front (url() arma la URL de la API)
+        $frontend = rtrim((string) config('app.frontend_url'), '/');
+
         return (new MailMessage)
             ->subject($this->accion === 'creada'
                 ? "Nueva nota de crédito registrada — {$tipoLabel}"
@@ -56,7 +59,7 @@ class CreditNoteRequestNotification extends Notification
                 'descripcion' => $this->creditNoteRequest->description,
                 'montoSolicitado' => $this->creditNoteRequest->amount_requested,
                 'facturaFolio' => $this->creditNoteRequest->relatedInvoice?->tran_id,
-                'actionUrl' => url('/provider/account-statement'),
+                'actionUrl' => $frontend . '/provider/account-statement',
             ]);
     }
 }

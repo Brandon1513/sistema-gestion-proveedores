@@ -185,13 +185,26 @@
     </style>
 </head>
 <body>
+    @php
+        // ✅ Logo incrustado en el correo (cid:): Outlook lo muestra sin pedir
+        // "descargar imágenes". Si no se puede incrustar, se usa la URL pública.
+        $logoPath = public_path('images/logo.png');
+        $logoSrc  = (isset($message) && is_file($logoPath))
+            ? $message->embed($logoPath)
+            : config('app.url') . '/images/logo.png';
+
+        // ✅ Links del pie al portal (front), no a la API
+        $portalUrl = rtrim((string) config('app.frontend_url'), '/');
+    @endphp
     <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #F5F0F6; padding: 20px 0;">
         <tr>
             <td align="center">
                 <div class="email-wrapper">
                     <!-- Header -->
                     <div class="email-header">
-                        <img src="{{ config('app.url') }}/images/logo.png" alt="DASAVENA Logo" class="email-logo-img">
+                        {{-- width/height como atributos: Outlook ignora el max-width del CSS --}}
+                        <img src="{{ $logoSrc }}" alt="DASAVENA" width="120" class="email-logo-img"
+                             style="display: block; margin: 0 auto 15px; width: 120px; max-width: 120px; height: auto; border: 0;">
                         <div class="email-subtitle">Sistema de Gestión de Proveedores</div>
                     </div>
 
@@ -205,9 +218,8 @@
                         <p><strong class="footer-brand">DASAVENA</strong></p>
                         <p style="color: #6b7280; margin-top: 5px;">Sistema de Gestión de Proveedores</p>
                         <div class="footer-links">
-                            <a href="{{ config('app.url') }}">Ir al Sistema</a>
-                            <a href="{{ config('app.url') }}/ayuda">Ayuda</a>
-                            <a href="{{ config('app.url') }}/contacto">Contacto</a>
+                            <a href="{{ $portalUrl }}">Ir al portal</a>
+                            <a href="{{ $portalUrl }}/provider/help">Ayuda</a>
                         </div>
                         <p class="footer-copyright">
                             &copy; {{ date('Y') }} <span class="footer-brand">DASAVENA</span>. Todos los derechos reservados.
