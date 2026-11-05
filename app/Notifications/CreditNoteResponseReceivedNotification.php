@@ -33,6 +33,9 @@ class CreditNoteResponseReceivedNotification extends Notification
         ];
         $tipoLabel = $tipoLabels[$this->creditNoteRequest->type] ?? $this->creditNoteRequest->type;
 
+        // ✅ Link al front (url() arma la URL de la API)
+        $frontend = rtrim((string) config('app.frontend_url'), '/');
+
         return (new MailMessage)
             ->subject("{$this->creditNoteRequest->provider->business_name} subió su CFDI de nota de crédito")
             ->view('emails.credit-note-response-received', [
@@ -40,7 +43,7 @@ class CreditNoteResponseReceivedNotification extends Notification
                 'tipoLabel' => $tipoLabel,
                 'descripcion' => $this->creditNoteRequest->description,
                 'facturaFolio' => $this->creditNoteRequest->relatedInvoice?->tran_id,
-                'actionUrl' => url('/finance/account-statement'),
+                'actionUrl' => $frontend . '/finance/account-statement',
             ]);
     }
 }

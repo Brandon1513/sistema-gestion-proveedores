@@ -163,6 +163,10 @@ class AppointmentController extends Controller
                 ]);
             }
         }
+
+        // ✅ Avisar al proveedor de la cita (también aplica a las reagendadas).
+        // Antes solo se le avisaba al cancelar.
+        $this->notifyProvider($appointment->fresh(['provider']), 'scheduled');
  
         return response()->json([
             'message'     => 'Cita agendada correctamente',

@@ -219,7 +219,8 @@
         <!-- Header -->
         <div class="email-header">
             <div class="logo-container">
-                <img src="{{ config('app.url') }}/images/logo.png" alt="DASAVENA Logo" class="logo">
+                @php($logoPath = public_path('images/logo.png'))
+                <img src="{{ isset($message) && is_file($logoPath) ? $message->embed($logoPath) : config('app.url').'/images/logo.png' }}" alt="DASAVENA" width="120" class="logo" style="display: block; margin: 0 auto; width: 120px; max-width: 120px; height: auto; border: 0;">
             </div>
             <h1>📄 Nuevo Documento Pendiente</h1>
             <p>Sistema de Gestión de Proveedores</p>

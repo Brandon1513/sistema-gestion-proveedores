@@ -4,7 +4,6 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use App\Http\Middleware\CheckRole;
 use App\Http\Middleware\CheckTokenExpiration;
-use Illuminate\Http\Middleware\HandleCors;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -14,17 +13,14 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        // ✅ CORS primero que todo
-        $middleware->use([
-            HandleCors::class,
-        ]);
+        // CORS: Laravel ya incluye HandleCors en la pila global por defecto, antes
+        // que los demás middleware. NO usar $middleware->use([...]) para "ponerlo
+        // primero": use() REEMPLAZA toda la pila global y se pierden TrimStrings,
+        // ConvertEmptyStringsToNull, ValidatePostSize y PreventRequestsDuringMaintenance.
 
+        // Agrega EnsureFrontendRequestsAreStateful al grupo api (no hace falta agregarlo aparte)
         $middleware->statefulApi();
-        
-        $middleware->api(prepend: [
-            \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
-        ]);
-        
+
         $middleware->validateCsrfTokens(except: [
             'api/*',
         ]);

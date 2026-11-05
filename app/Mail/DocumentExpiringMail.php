@@ -60,7 +60,9 @@ class DocumentExpiringMail extends Mailable
                 'documentType' => $this->document->documentType,
                 'daysUntilExpiry' => $this->daysUntilExpiry,
                 'urgencyLevel' => $this->urgencyLevel,
-                'appUrl' => config('app.url'),
+                // ✅ Portal del proveedor (front), en "Cargar Documentos".
+                // Antes era config('app.url'), que es la URL de la API.
+                'appUrl' => rtrim((string) config('app.frontend_url'), '/') . '/provider/upload',
             ],
         );
     }

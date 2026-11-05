@@ -37,6 +37,9 @@ class OverdueInvoicesDigestNotification extends Notification
                 return "{$provider} — {$invoice->tran_id} — \$" . number_format($invoice->amount, 2) . " — {$daysOverdue} días vencida";
             });
 
+        // ✅ Link al front (url() arma la URL de la API)
+        $frontend = rtrim((string) config('app.frontend_url'), '/');
+
         $mail = (new MailMessage)
             ->subject("Resumen diario: {$count} facturas vencidas — \$" . number_format($totalAmount, 2))
             ->view('emails.overdue-invoices-digest', [
@@ -45,7 +48,7 @@ class OverdueInvoicesDigestNotification extends Notification
                 'rows' => $rows,
                 'hasMore' => $this->invoices->count() > 15,
                 'remainingCount' => max(0, $this->invoices->count() - 15),
-                'actionUrl' => url('/finance/account-statement'),
+                'actionUrl' => $frontend . '/finance/account-statement',
             ]);
 
         return $mail;
