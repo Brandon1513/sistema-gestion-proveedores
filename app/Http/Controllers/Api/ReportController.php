@@ -9,6 +9,7 @@ use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -40,6 +41,10 @@ class ReportController extends Controller
         if ($request->filled('status'))      $query->where('status', $request->status);
         if ($request->filled('reception_status')) $query->where('reception_status', $request->reception_status);
 
+        // ✅ Puntualidad (solo citas con entrada confirmada por Seguridad)
+        if ($request->punctuality === 'on_time') $query->where('arrived_on_time', true);
+        if ($request->punctuality === 'late')    $query->where('arrived_on_time', false);
+
         return $query;
     }
 
@@ -51,7 +56,59 @@ class ReportController extends Controller
             'provider_id'      => 'nullable|exists:providers,id',
             'status'           => 'nullable|string',
             'reception_status' => 'nullable|string',
+            'punctuality'      => 'nullable|in:on_time,late',
         ]);
+    }
+
+    /**
+     * Resultado de un rubro de condiciones de la entrega: 'Cumple', 'No cumple' o '' si no se evaluó.
+     */
+    private function conditionResult(Appointment $a, string $key): string
+    {
+        $c = collect($a->delivery_conditions ?? [])->firstWhere('key', $key);
+        if (!$c) return '';
+        return !empty($c['passed']) ? 'Cumple' : 'No cumple';
+    }
+
+    /**
+     * Observaciones de los rubros que no cumplieron, en un solo texto.
+     */
+    private function conditionNotes(Appointment $a): string
+    {
+        return collect($a->delivery_conditions ?? [])
+            ->filter(fn ($c) => empty($c['passed']) && !empty($c['notes']))
+            ->map(fn ($c) => "{$c['label']}: {$c['notes']}")
+            ->implode(' | ');
+    }
+
+    /**
+     * Indicadores del periodo filtrado (sobre TODAS las citas que cumplen los filtros).
+     */
+    private function buildAppointmentsSummary(Builder $query): array
+    {
+        $withEntry = (clone $query)->whereNotNull('arrived_on_time');
+        $entries   = (clone $withEntry)->count();
+        $onTime    = (clone $withEntry)->where('arrived_on_time', true)->count();
+        $late      = $entries - $onTime;
+        $avgDelay  = (clone $withEntry)->where('arrived_on_time', false)->avg('delay_minutes');
+        $noShow    = (clone $query)->where('status', 'no_show')->count();
+
+        // Condiciones de la entrega: se leen solo las columnas necesarias
+        $conditions = (clone $query)->setEagerLoads([])->whereNotNull('delivery_conditions')
+            ->get(['id', 'delivery_conditions']);
+        $evaluated     = $conditions->count();
+        $withFailures  = $conditions->filter(fn ($a) => $a->has_failed_conditions)->count();
+
+        return [
+            'entries'                 => $entries,
+            'on_time'                 => $onTime,
+            'late'                    => $late,
+            'on_time_pct'             => $entries > 0 ? round($onTime / $entries * 100) : null,
+            'avg_delay_minutes'       => $avgDelay !== null ? round((float) $avgDelay) : null,
+            'no_show'                 => $noShow,
+            'conditions_evaluated'    => $evaluated,
+            'conditions_with_failures'=> $withFailures,
+        ];
     }
 
     /**
@@ -63,8 +120,9 @@ class ReportController extends Controller
     {
         $this->validateAppointmentFilters($request);
 
-        $query = $this->buildAppointmentsQuery($request);
-        $total = (clone $query)->count();
+        $query   = $this->buildAppointmentsQuery($request);
+        $total   = (clone $query)->count();
+        $summary = $this->buildAppointmentsSummary($query);
 
         $appointments = $query
             ->orderBy('appointment_date')
@@ -75,6 +133,7 @@ class ReportController extends Controller
         $rows = $appointments->map(function ($a) {
             $items             = $a->items;
             $notDeliveredCount = $items->where('reception_status', 'not_delivered')->count();
+            $conditions        = collect($a->delivery_conditions ?? []);
 
             return [
                 'id'                  => $a->id,
@@ -93,14 +152,36 @@ class ReportController extends Controller
                 'items_total'         => $items->count(),
                 'items_not_delivered' => $notDeliveredCount,
                 'has_missing_docs'    => (bool) $a->has_missing_docs,
+                // ✅ Puntualidad
+                'actual_arrival_time' => $a->actual_arrival_time ? substr($a->actual_arrival_time, 0, 5) : null,
+                'arrived_on_time'     => $a->arrived_on_time,
+                'delay_minutes'       => $a->delay_minutes,
+                // ✅ Condiciones de la entrega
+                'conditions_evaluated'=> $conditions->isNotEmpty(),
+                'conditions_failed'   => $conditions->filter(fn ($c) => empty($c['passed']))->count(),
             ];
         });
 
         return response()->json([
             'total'   => $total,
             'showing' => $rows->count(),
+            'summary' => $summary,
             'rows'    => $rows,
         ]);
+    }
+
+    /**
+     * Aplica encabezado con estilo, ancho automático y congela la primera fila.
+     */
+    private function styleSheet($sheet, int $columnCount): void
+    {
+        $lastCol = Coordinate::stringFromColumnIndex($columnCount);
+        for ($i = 1; $i <= $columnCount; $i++) {
+            $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($i))->setAutoSize(true);
+        }
+        $sheet->getStyle("A1:{$lastCol}1")->getFont()->setBold(true);
+        $sheet->getStyle("A1:{$lastCol}1")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('E5E7EB');
+        $sheet->freezePane('A2');
     }
 
     /**
@@ -116,20 +197,26 @@ class ReportController extends Controller
             ->orderBy('appointment_time')
             ->get();
 
+        $conditionKeys = array_keys(Appointment::DELIVERY_CONDITIONS);
+
         $spreadsheet = new Spreadsheet();
 
         // ── Hoja 1: Resumen de citas ────────────────────────────────────────
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Citas');
 
-        $headers = [
+        $headers = array_merge([
             'ID', 'Fecha', 'Hora', 'Tipo', 'Proveedor', 'RFC', 'Tipo Proveedor',
             'Estado Cita', 'Agendada por', 'Reagendada de',
-            'Entrada Confirmada', 'Hora Llegada', 'Llegó a Tiempo', 'Docs Faltantes',
+            'Entrada Confirmada', 'Hora Llegada', 'Llegó a Tiempo', 'Retraso (min)', 'Docs Faltantes',
             'No se Presentó — Notas',
             'Estado Recepción', 'Revisado por', 'Fecha Revisión', 'Observaciones Recepción',
             'Total Ítems', 'Ítems No Entregados',
-        ];
+        ],
+            // ✅ Condiciones de la entrega (un rubro por columna)
+            array_map(fn ($k) => Appointment::DELIVERY_CONDITIONS[$k]['label'], $conditionKeys),
+            ['Observaciones Condiciones']
+        );
         $sheet->fromArray($headers, null, 'A1');
 
         $row = 2;
@@ -137,7 +224,7 @@ class ReportController extends Controller
             $items             = $a->items;
             $notDeliveredCount = $items->where('reception_status', 'not_delivered')->count();
 
-            $sheet->fromArray([
+            $sheet->fromArray(array_merge([
                 $a->id,
                 $a->appointment_date?->format('Y-m-d'),
                 substr($a->appointment_time, 0, 5),
@@ -153,6 +240,7 @@ class ReportController extends Controller
                 $a->is_entry_confirmed ? 'Sí' : 'No',
                 $a->actual_arrival_time ? substr($a->actual_arrival_time, 0, 5) : '',
                 is_null($a->arrived_on_time) ? '' : ($a->arrived_on_time ? 'Sí' : 'No'),
+                $a->delay_minutes ?? '',
                 $a->has_missing_docs ? 'Sí' : 'No',
                 $a->no_show_notes,
                 $a->reception_label,
@@ -161,16 +249,13 @@ class ReportController extends Controller
                 $a->reception_notes,
                 $items->count(),
                 $notDeliveredCount,
-            ], null, "A{$row}");
+            ],
+                array_map(fn ($k) => $this->conditionResult($a, $k), $conditionKeys),
+                [$this->conditionNotes($a)]
+            ), null, "A{$row}");
             $row++;
         }
-
-        foreach (range('A', 'U') as $col) {
-            $sheet->getColumnDimension($col)->setAutoSize(true);
-        }
-        $sheet->getStyle('A1:U1')->getFont()->setBold(true);
-        $sheet->getStyle('A1:U1')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('E5E7EB');
-        $sheet->freezePane('A2');
+        $this->styleSheet($sheet, count($headers));
 
         // ── Hoja 2: Detalle por producto ─────────────────────────────────────
         $sheet2 = $spreadsheet->createSheet();
@@ -180,7 +265,7 @@ class ReportController extends Controller
             'Cita ID', 'Fecha', 'Proveedor', 'Producto/Servicio', 'Tipo',
             'Cant. Esperada', 'Unidad Esperada', 'No Entregado',
             'Cant. Recibida', 'Unidad Recibida', 'Cant. Rechazada', 'Cant. Aceptada',
-            'Estado Ítem', 'Motivo Rechazo', 'Observaciones',
+            'Estado Ítem', 'Motivo Rechazo', 'Observaciones para el Proveedor', 'Observaciones Internas',
         ];
         $sheet2->fromArray($headers2, null, 'A1');
 
@@ -206,18 +291,59 @@ class ReportController extends Controller
                     $item->not_delivered ? '' : $acc,
                     $item->reception_status_label,
                     $item->rejection_reason_label,
+                    $item->provider_notes,
                     $item->reception_notes,
                 ], null, "A{$row2}");
                 $row2++;
             }
         }
+        $this->styleSheet($sheet2, count($headers2));
 
-        foreach (range('A', 'O') as $col) {
-            $sheet2->getColumnDimension($col)->setAutoSize(true);
+        // ── Hoja 3: Desempeño por proveedor ───────────────────────────────────
+        // Base para la evaluación de proveedores: puntualidad, inasistencias y
+        // rubros de condiciones de la entrega que no cumplieron.
+        $sheet3 = $spreadsheet->createSheet();
+        $sheet3->setTitle('Desempeño por Proveedor');
+
+        $headers3 = array_merge([
+            'Proveedor', 'RFC', 'Citas', 'Con Entrada', 'A Tiempo', 'Con Retraso',
+            '% A Tiempo', 'Retraso Promedio (min)', 'No se Presentó', 'Recepciones Evaluadas',
+        ],
+            array_map(fn ($k) => 'No cumple: ' . Appointment::DELIVERY_CONDITIONS[$k]['label'], $conditionKeys)
+        );
+        $sheet3->fromArray($headers3, null, 'A1');
+
+        $row3 = 2;
+        $byProvider = $appointments->groupBy('provider_id')
+            ->sortBy(fn ($group) => $group->first()->provider?->business_name);
+
+        foreach ($byProvider as $group) {
+            $first     = $group->first();
+            $withEntry = $group->filter(fn ($a) => !is_null($a->arrived_on_time));
+            $onTime    = $withEntry->where('arrived_on_time', true)->count();
+            $lateGroup = $withEntry->where('arrived_on_time', false);
+            $evaluated = $group->filter(fn ($a) => !empty($a->delivery_conditions));
+
+            $failedByCondition = array_map(
+                fn ($k) => $evaluated->filter(fn ($a) => $this->conditionResult($a, $k) === 'No cumple')->count(),
+                $conditionKeys
+            );
+
+            $sheet3->fromArray(array_merge([
+                $first->provider?->business_name,
+                $first->provider?->rfc,
+                $group->count(),
+                $withEntry->count(),
+                $onTime,
+                $lateGroup->count(),
+                $withEntry->count() > 0 ? round($onTime / $withEntry->count() * 100) . '%' : '',
+                $lateGroup->count() > 0 ? round((float) $lateGroup->avg('delay_minutes')) : '',
+                $group->where('status', 'no_show')->count(),
+                $evaluated->count(),
+            ], $failedByCondition), null, "A{$row3}");
+            $row3++;
         }
-        $sheet2->getStyle('A1:O1')->getFont()->setBold(true);
-        $sheet2->getStyle('A1:O1')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('E5E7EB');
-        $sheet2->freezePane('A2');
+        $this->styleSheet($sheet3, count($headers3));
 
         $spreadsheet->setActiveSheetIndex(0);
 
