@@ -73,4 +73,10 @@ return [
         'token'      => env('CRON_TRIGGER_TOKEN'),
         'php_binary' => env('CRON_PHP_BINARY', 'php'),
     ],
+    // No Conformidades: consecutivo inicial del folio por año (continúa la numeración manual de Calidad)
+    'non_conformities' => [
+        'folio_start' => [
+            2026 => (int) env('NC_FOLIO_START_2026', 1),
+        ],
+    ],
 ];

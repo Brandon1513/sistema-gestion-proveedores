@@ -10,6 +10,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.2",
+        "barryvdh/laravel-dompdf": "^3.1",
         "intervention/image": "^3.11",
         "laravel/framework": "^12.0",
         "laravel/sanctum": "^4.0",
@@ -19,7 +20,8 @@
         "phpoffice/phpspreadsheet": "^5.5",
         "socialiteproviders/microsoft": "^4.10",
         "spatie/laravel-permission": "^6.24",
-        "spatie/laravel-query-builder": "^6.4"
+        "spatie/laravel-query-builder": "^6.4",
+        "symfony/html-sanitizer": "^8.1"
     },
     "require-dev": {
         "barryvdh/laravel-debugbar": "^3.16",
