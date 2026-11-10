@@ -127,3 +127,8 @@ Schedule::call(function () {
 //     ->dailyAt('08:00')
 //     ->timezone('America/Mexico_City')
 //     ->emailOutputOnFailure('admin@sgp.local');
+
+// Recordatorios de No Conformidades: 7 días antes y el día que vence
+Schedule::command('non-conformities:send-reminders')
+    ->dailyAt('08:00')
+    ->withoutOverlapping();

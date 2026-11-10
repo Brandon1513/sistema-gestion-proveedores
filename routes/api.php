@@ -4,8 +4,10 @@ use App\Http\Controllers\Api\AppointmentController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CalendarBlockController;
 use App\Http\Controllers\Api\CatalogImportController;
+use App\Http\Controllers\Api\CronTriggerController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\DepartmentController;
+use App\Http\Controllers\Api\DocumentChangeRequestController;
 use App\Http\Controllers\Api\DocumentStatusController;
 use App\Http\Controllers\Api\DocumentTemplateController;
 use App\Http\Controllers\Api\DocumentTypeController;
@@ -13,6 +15,8 @@ use App\Http\Controllers\Api\DocumentValidationController;
 use App\Http\Controllers\Api\FinanceAccountStatementController;
 use App\Http\Controllers\Api\InvoiceSubmissionController;
 use App\Http\Controllers\Api\MicrosoftAuthController;
+use App\Http\Controllers\Api\NonConformityController;
+use App\Http\Controllers\Api\NonConformityReportController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\PasswordResetController;
 use App\Http\Controllers\Api\PaymentComplementController;
@@ -35,8 +39,6 @@ use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\SyncHealthController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Api\DocumentChangeRequestController;
-use App\Http\Controllers\Api\CronTriggerController;
 
 /*
 |--------------------------------------------------------------------------
@@ -383,8 +385,53 @@ Route::middleware(['check.token.expiration', 'auth:sanctum'])->group(function ()
         Route::post('/appointment-items/{itemId}/photos', [AppointmentController::class, 'uploadItemPhotos'])->whereNumber('itemId');
         Route::delete('/appointment-item-photos/{photoId}', [AppointmentController::class, 'deleteItemPhoto'])->whereNumber('photoId');
     });
+
+    // ===============================
+    // NO CONFORMIDADES (F-CAL-24)
+    // ===============================
+
+        // Indicadores y Excel de NC: super admin, ingeniero de alimentos y compras
+    Route::middleware(['role:super_admin,ingeniero_alimentos,compras'])->prefix('non-conformities')->group(function () {
+        Route::get('/stats',  [NonConformityReportController::class, 'stats']);
+        Route::get('/export', [NonConformityReportController::class, 'export']);
+    });
+    // Lectura: ingeniero de alimentos, calidad, compras y admins
+    Route::middleware(['role:super_admin,admin,ingeniero_alimentos,calidad,compras'])->prefix('non-conformities')->group(function () {
+        Route::get('/',      [NonConformityController::class, 'index']);
+        Route::get('/types', [NonConformityController::class, 'types']);
+        Route::get('/{id}',  [NonConformityController::class, 'show'])->whereNumber('id');
+        Route::get('/{id}/pdf', [NonConformityController::class, 'pdf'])->whereNumber('id');
+    });
+
+    // Crear, editar y borrar: solo ingeniero de alimentos y admins
+    Route::middleware(['role:super_admin,admin,ingeniero_alimentos'])->prefix('non-conformities')->group(function () {
+        Route::get('/provider-products/{providerId}', [NonConformityController::class, 'providerProducts'])->whereNumber('providerId');
+        Route::post('/',                 [NonConformityController::class, 'store']);
+        Route::put('/{id}',              [NonConformityController::class, 'update'])->whereNumber('id');
+        Route::delete('/{id}',           [NonConformityController::class, 'destroy'])->whereNumber('id');
+        Route::post('/{id}/photos',      [NonConformityController::class, 'uploadPhotos'])->whereNumber('id');
+        Route::delete('/photos/{photoId}', [NonConformityController::class, 'deletePhoto'])->whereNumber('photoId');
+        Route::post('/{id}/responses/{responseId}/review', [NonConformityController::class, 'reviewResponse'])->whereNumber(['id', 'responseId']);
+        Route::post('/{id}/evidences/{evidenceId}/review', [NonConformityController::class, 'reviewEvidence'])->whereNumber(['id', 'evidenceId']);
+        Route::post('/{id}/close',                         [NonConformityController::class, 'close'])->whereNumber('id');
+    });
+
+    // Fotos (internos y el proveedor dueño de la NC)
+    Route::middleware(['role:super_admin,admin,ingeniero_alimentos,calidad,compras,proveedor', 'throttle:120,1'])
+        ->get('/non-conformity-photos/{photoId}', [NonConformityController::class, 'showPhoto'])->whereNumber('photoId');
+
+    // Portal del proveedor
+    Route::middleware(['role:proveedor'])->prefix('provider/non-conformities')->group(function () {
+        Route::get('/',     [NonConformityController::class, 'myIndex']);
+        Route::get('/{id}', [NonConformityController::class, 'myShow'])->whereNumber('id');
+        Route::middleware('throttle:10,1')->post('/{id}/responses', [NonConformityController::class, 'submitResponse'])->whereNumber('id');
+        Route::middleware('throttle:20,1')->post('/{id}/actions/{actionId}/evidences', [NonConformityController::class, 'uploadEvidence'])->whereNumber(['id', 'actionId']);
+        Route::get('/{id}/pdf', [NonConformityController::class, 'myPdf'])->whereNumber('id');
+    });
     Route::middleware(['role:super_admin,admin,compras,calidad,ingeniero_alimentos,proveedor', 'throttle:120,1'])
         ->get('/appointment-item-photos/{photoId}', [AppointmentController::class, 'showItemPhoto'])->whereNumber('photoId');
+    Route::middleware(['role:super_admin,admin,ingeniero_alimentos,calidad,compras,proveedor', 'throttle:60,1'])
+        ->get('/non-conformity-evidences/{evidenceId}', [NonConformityController::class, 'downloadEvidence'])->whereNumber('evidenceId');
 
     // Config citas físicas
     Route::get('/appointments/{id}/physical-docs-config', [AppointmentController::class, 'getPhysicalDocsConfig']);
