@@ -8,10 +8,12 @@ use App\Http\Requests\RegisterProviderRequest;
 use App\Models\User;
 use App\Models\Provider;
 use App\Models\ProviderInvitation;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
@@ -196,20 +198,39 @@ class AuthController extends Controller
                 'token' => $token,
             ], 201);
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             DB::rollBack();
 
+            // Folio corto para que el proveedor lo reporte y podamos buscarlo en el log
+            $ref = strtoupper(Str::random(6));
+
             \Log::error('Error al registrar proveedor', [
+                'ref'     => $ref,
                 'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'email' => $invitation->email ?? null,
-                'token' => $request->token ?? null,
+                'trace'   => $e->getTraceAsString(),
+                'email'   => $invitation->email ?? null,
+                'token'   => $request->token ?? null,
             ]);
 
-            return response()->json([
-                'message' => 'Error al registrar proveedor',
-                'error'   => $e->getMessage(),
-            ], 500);
+            // Traducir los errores de BD más comunes a algo que el proveedor entienda.
+            // Nunca se le manda el SQL (trae RFC, CLABE, cuenta, etc.).
+            $sqlState = $e instanceof QueryException
+                ? ($e->errorInfo[0] ?? (string) $e->getCode())
+                : null;
+
+            $message = match ($sqlState) {
+                '22001' => 'Uno de los datos que capturaste es más largo de lo permitido. Revisa número exterior e interior, teléfonos, código postal y CLABE, e intenta de nuevo.',
+                '23505' => 'Ya existe un registro con alguno de estos datos (RFC o correo). Si ya te registraste antes, inicia sesión con tu correo.',
+                '23502' => 'Falta un dato obligatorio. Revisa que todos los campos marcados con * estén completos.',
+                default => 'Ocurrió un error inesperado y tu registro no se guardó. Intenta de nuevo en unos minutos.',
+            };
+
+            return response()->json(array_filter([
+                'message' => "{$message} Si el problema continúa, escribe a compras@dasavena.com con el folio {$ref}.",
+                'ref'     => $ref,
+                // Detalle técnico solo con APP_DEBUG=true (local)
+                'error'   => config('app.debug') ? $e->getMessage() : null,
+            ], fn ($v) => !is_null($v)), 500);
         }
     }
 
