@@ -368,6 +368,7 @@ Route::middleware(['check.token.expiration', 'auth:sanctum'])->group(function ()
         Route::get('/appointments',                     [AppointmentController::class, 'securityIndex']);
         Route::post('/appointments/{id}/confirm-entry', [AppointmentController::class, 'confirmEntry']);
         Route::post('/appointments/{id}/no-show',       [AppointmentController::class, 'markNoShow']);
+        Route::post('/appointments/{id}/register-exit', [AppointmentController::class, 'registerExit']);
     });
 
     // Productos para citas — Compras/Admin

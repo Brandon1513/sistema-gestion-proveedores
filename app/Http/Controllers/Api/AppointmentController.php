@@ -51,6 +51,7 @@ class AppointmentController extends Controller
             'vehicle:id,brand_model,plates',
             'personnel:id,full_name,position',
             'entryConfirmedBy:id,name',
+            'exitRegisteredBy:id,name',
             'receptionReviewedBy:id,name',
             'rescheduledFrom:id,appointment_date,appointment_time', // ✅ nuevo
             // ✅ Ítems con resultado de recepción y fotos (evita una consulta por cita)
@@ -184,6 +185,7 @@ class AppointmentController extends Controller
             'personnel:id,full_name,position',
             'cancelledBy:id,name',
             'entryConfirmedBy:id,name',
+            'exitRegisteredBy:id,name',
             'receptionReviewedBy:id,name',
             'rescheduledFrom:id,appointment_date,appointment_time', // ✅ nuevo
             'items.productService:id,name,type',
@@ -345,6 +347,12 @@ class AppointmentController extends Controller
             'personnel:id,full_name',
             'entryConfirmedBy:id,name',
             'noShowRegisteredBy:id,name',
+            'exitRegisteredBy:id,name',
+            // ✅ Recepción: Seguridad ve el resultado y las observaciones internas del ingeniero
+            'receptionReviewedBy:id,name',
+            'items.productService:id,name,type',
+            'items.unit:id,name,abbreviation',
+            'items.receivedUnit:id,name,abbreviation',
         ])->whereNotIn('status', ['cancelled']);
  
         // ── Filtro por vista ──────────────────────────────────────
@@ -864,7 +872,7 @@ class AppointmentController extends Controller
             'type_label'               => $a->type_label,
             'status'                   => $a->status,
             'status_label'             => $a->status_label,
-            'notes'                    => $a->notes,
+            'notes'                    => $a->notes, // ✅ observaciones internas (Compras) — no se mandan al proveedor
             'products'                 => $a->products, // legacy
             'has_attachment'           => (bool)$a->attachment_path,
             'attachment_name'          => $a->attachment_name,
@@ -883,6 +891,13 @@ class AppointmentController extends Controller
             'delay_minutes'            => $a->delay_minutes,
             'has_missing_docs'         => $a->has_missing_docs,
             'physical_docs_status'     => $a->physical_docs_status,
+            // ✅ Salida (cierre de la cita por Seguridad)
+            'is_exit_registered'       => $a->is_exit_registered,
+            'actual_exit_time'         => $a->actual_exit_time ? substr($a->actual_exit_time, 0, 5) : null,
+            'exit_registered_at'       => $a->exit_registered_at?->format('Y-m-d H:i'),
+            'exit_registered_by_name'  => $a->relationLoaded('exitRegisteredBy') ? $a->exitRegisteredBy?->name : null,
+            'exit_notes'               => $a->exit_notes,
+            'stay_minutes'             => $a->stay_minutes,
             // No show
             'is_no_show'               => $a->is_no_show,
             'no_show_at'               => $a->no_show_at?->format('H:i'),
@@ -955,6 +970,9 @@ class AppointmentController extends Controller
             $data['entry_notes'],
             $data['no_show_notes'],
             $data['physical_docs_status'],
+            $data['notes'],                    // ✅ observaciones internas de Compras
+            $data['exit_notes'],
+            $data['exit_registered_by_name'],
         );
 
         $reviewed = (bool) $a->is_reception_reviewed;
@@ -1018,6 +1036,50 @@ class AppointmentController extends Controller
     ]);
 
     }
+    // ── Salida del proveedor (cierre de la cita por Seguridad) ─────────────
+    // POST /api/security/appointments/{id}/register-exit
+
+    public function registerExit(Request $request, $appointmentId): JsonResponse
+    {
+        $appointment = Appointment::with('provider:id,business_name')->findOrFail($appointmentId);
+
+        if (!$appointment->is_entry_confirmed) {
+            return response()->json(['message' => 'Primero debe confirmarse la entrada del proveedor'], 422);
+        }
+        if ($appointment->is_exit_registered) {
+            return response()->json(['message' => 'La salida de esta cita ya fue registrada'], 422);
+        }
+
+        $request->validate([
+            'actual_exit_time' => 'required|date_format:H:i',
+            'exit_notes'       => 'nullable|string|max:500',
+        ], [
+            'actual_exit_time.required' => 'Indica la hora de salida',
+        ]);
+
+        $arrival = substr((string) $appointment->actual_arrival_time, 0, 5);
+        if ($arrival && $request->actual_exit_time < $arrival) {
+            return response()->json([
+                'message' => "La hora de salida no puede ser anterior a la de llegada ({$arrival})",
+                'errors'  => ['actual_exit_time' => ["La hora de salida no puede ser anterior a la de llegada ({$arrival})"]],
+            ], 422);
+        }
+
+        $appointment->update([
+            'actual_exit_time'   => $request->actual_exit_time,
+            'exit_registered_at' => now(),
+            'exit_registered_by' => auth()->id(),
+            'exit_notes'         => $request->exit_notes ?: null,
+        ]);
+
+        return response()->json([
+            'message'     => 'Salida registrada',
+            'appointment' => $this->formatAppointment($appointment->fresh([
+                'provider.providerType', 'vehicle', 'personnel', 'entryConfirmedBy', 'exitRegisteredBy',
+            ])),
+        ]);
+    }
+
     private function validateBusinessHours(string $date, string $time, callable $fail): void
     {
         $carbon    = Carbon::parse($date);
@@ -1051,7 +1113,7 @@ class AppointmentController extends Controller
                 'date'          => Carbon::parse($appointment->appointment_date)->locale('es')->isoFormat('dddd D [de] MMMM [de] YYYY'),
                 'time'          => $appointment->appointment_time,
                 'typeLabel'     => $appointment->type_label,
-                'notes'         => $appointment->notes,
+                'notes'         => null, // ✅ las observaciones de Compras son internas
                 'cancelReason'  => $appointment->cancellation_reason,
                 'hasAttachment' => (bool)$appointment->attachment_path,
                 'portalUrl'     => config('app.frontend_url').'/provider/appointments',
