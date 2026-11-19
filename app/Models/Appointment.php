@@ -21,6 +21,7 @@ class Appointment extends Model
         'status', 'cancellation_reason', 'cancelled_by', 'cancelled_at',
         'entry_confirmed_at', 'entry_confirmed_by', 'entry_notes',
         'actual_arrival_time', 'arrived_on_time', 'delay_minutes',
+        'actual_exit_time', 'exit_registered_at', 'exit_registered_by', 'exit_notes', //  salida (Seguridad)
         'physical_docs_status', 'has_missing_docs',
         'no_show_at', 'no_show_registered_by', 'no_show_notes',
         'reception_status', 'reception_notes', 'reception_photos',
@@ -29,7 +30,7 @@ class Appointment extends Model
         'rejection_reason', 'is_partial_rejection',
         'rescheduled_from_id',
         'rescheduled_to_id',
-        'delivery_conditions', // ✅ checklist del ingeniero de alimentos
+        'delivery_conditions', // checklist del ingeniero de alimentos
     ];
 
     protected $casts = [
@@ -39,9 +40,10 @@ class Appointment extends Model
         'entry_confirmed_at'       => 'datetime',
         'reception_reviewed_at'    => 'datetime',
         'no_show_at'               => 'datetime',
+        'exit_registered_at'       => 'datetime',
         'reception_photos'         => 'array',
         'physical_docs_status'     => 'array',
-        'delivery_conditions'      => 'array', // ✅
+        'delivery_conditions'      => 'array', 
         'arrived_on_time'          => 'boolean',
         'has_missing_docs'         => 'boolean',
         'is_partial_rejection'     => 'boolean',
@@ -79,7 +81,7 @@ class Appointment extends Model
     ];
 
     /**
-     * ✅ Condiciones de la entrega que evalúa el ingeniero de alimentos al recibir.
+     * Condiciones de la entrega que evalúa el ingeniero de alimentos al recibir.
      * Mantener las mismas llaves en el front (FoodEngineerPage → DELIVERY_CONDITIONS).
      */
     const DELIVERY_CONDITIONS = [
@@ -147,7 +149,7 @@ class Appointment extends Model
         return $this->status === 'no_show';
     }
 
-    /** ✅ true si algún rubro de las condiciones de la entrega no cumplió */
+    /**true si algún rubro de las condiciones de la entrega no cumplió */
     public function getHasFailedConditionsAttribute(): bool
     {
         return collect($this->delivery_conditions ?? [])->contains(fn ($c) => empty($c['passed']));
@@ -175,6 +177,23 @@ class Appointment extends Model
     public function entryConfirmedBy(): BelongsTo    { return $this->belongsTo(User::class, 'entry_confirmed_by'); }
     public function receptionReviewedBy(): BelongsTo { return $this->belongsTo(User::class, 'reception_reviewed_by'); }
     public function noShowRegisteredBy(): BelongsTo  { return $this->belongsTo(User::class, 'no_show_registered_by'); }
+    public function exitRegisteredBy(): BelongsTo    { return $this->belongsTo(User::class, 'exit_registered_by'); }
+
+    /** ¿Seguridad ya registró la salida del proveedor? */
+    public function getIsExitRegisteredAttribute(): bool
+    {
+        return !is_null($this->exit_registered_at);
+    }
+
+    /** Minutos que el proveedor estuvo en planta (llegada → salida) */
+    public function getStayMinutesAttribute(): ?int
+    {
+        if (!$this->actual_arrival_time || !$this->actual_exit_time) return null;
+        $in  = \Carbon\Carbon::createFromFormat('H:i', substr($this->actual_arrival_time, 0, 5));
+        $out = \Carbon\Carbon::createFromFormat('H:i', substr($this->actual_exit_time, 0, 5));
+        $min = $in->diffInMinutes($out, false);
+        return $min >= 0 ? (int) $min : null;
+    }
     public function unit(): BelongsTo                { return $this->belongsTo(Unit::class); }
     public function items(): HasMany                 { return $this->hasMany(AppointmentItem::class); }
 

@@ -257,15 +257,23 @@ class ProviderDocumentController extends Controller
     public function view($providerId, $documentId, Request $request)
     {
         try {
-            if ($token = $request->query('token')) {
-                $accessToken = \Laravel\Sanctum\PersonalAccessToken::findToken($token);
-                if ($accessToken) {
-                    auth()->setUser($accessToken->tokenable);
-                }
+            // ✅ Primero el token del header (Authorization: Bearer, lo manda axios);
+            // si no viene, el ?token= de la URL, que usan las pantallas anteriores.
+            $user = auth('sanctum')->user();
+            if (!$user && ($token = $request->query('token'))) {
+                $user = \Laravel\Sanctum\PersonalAccessToken::findToken($token)?->tokenable;
             }
 
-            if (!auth()->check()) {
+            if (!$user) {
                 return response()->json(['message' => 'No autorizado. Token inválido o expirado.'], 401);
+            }
+
+            // ✅ Un proveedor solo puede ver sus propios documentos
+            if ($user->hasRole('proveedor')) {
+                $ownProviderId = Provider::where('email', $user->email)->value('id');
+                if ((int) $ownProviderId !== (int) $providerId) {
+                    return response()->json(['message' => 'No autorizado'], 403);
+                }
             }
 
             $document = ProviderDocument::where('id', $documentId)
@@ -299,7 +307,7 @@ class ProviderDocumentController extends Controller
                 ->header('Content-Type', $previewableTypes[$extension])
                 ->header('Content-Disposition', 'inline; filename="' . $document->original_filename . '"')
                 ->header('Content-Length', strlen($fileContents))
-                ->header('Cache-Control', 'public, max-age=3600');
+                ->header('Cache-Control', 'private, no-store'); // ✅ documentos fiscales: sin caché compartida
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json(['message' => 'Documento no encontrado'], 404);

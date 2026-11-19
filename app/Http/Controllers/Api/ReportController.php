@@ -159,6 +159,17 @@ class ReportController extends Controller
                 // ✅ Condiciones de la entrega
                 'conditions_evaluated'=> $conditions->isNotEmpty(),
                 'conditions_failed'   => $conditions->filter(fn ($c) => empty($c['passed']))->count(),
+                // ✅ Salida (Seguridad)
+                'actual_exit_time'    => $a->actual_exit_time ? substr($a->actual_exit_time, 0, 5) : null,
+                'stay_minutes'        => $a->stay_minutes,
+                // ✅ Observaciones internas (mismos nombres que en las citas, para reutilizar el componente)
+                'notes'               => $a->notes,
+                'entry_notes'         => $a->entry_notes,
+                'exit_notes'          => $a->exit_notes,
+                'reception_notes'     => $a->reception_notes,
+                'items'               => $items->filter(fn ($i) => filled($i->reception_notes))
+                    ->map(fn ($i) => ['product_name' => $i->productService?->name, 'reception_notes' => $i->reception_notes])
+                    ->values(),
             ];
         });
 
@@ -207,8 +218,9 @@ class ReportController extends Controller
 
         $headers = array_merge([
             'ID', 'Fecha', 'Hora', 'Tipo', 'Proveedor', 'RFC', 'Tipo Proveedor',
-            'Estado Cita', 'Agendada por', 'Reagendada de',
+            'Estado Cita', 'Agendada por', 'Reagendada de', 'Observaciones Compras (internas)',
             'Entrada Confirmada', 'Hora Llegada', 'Llegó a Tiempo', 'Retraso (min)', 'Docs Faltantes',
+            'Notas Seguridad (entrada)', 'Hora Salida', 'Tiempo en Planta (min)', 'Notas Seguridad (salida)',
             'No se Presentó — Notas',
             'Estado Recepción', 'Revisado por', 'Fecha Revisión', 'Observaciones Recepción',
             'Total Ítems', 'Ítems No Entregados',
@@ -237,11 +249,16 @@ class ReportController extends Controller
                 $a->rescheduledFrom
                     ? $a->rescheduledFrom->appointment_date?->format('Y-m-d') . ' ' . substr($a->rescheduledFrom->appointment_time, 0, 5)
                     : '',
+                $a->notes,
                 $a->is_entry_confirmed ? 'Sí' : 'No',
                 $a->actual_arrival_time ? substr($a->actual_arrival_time, 0, 5) : '',
                 is_null($a->arrived_on_time) ? '' : ($a->arrived_on_time ? 'Sí' : 'No'),
                 $a->delay_minutes ?? '',
                 $a->has_missing_docs ? 'Sí' : 'No',
+                $a->entry_notes,
+                $a->actual_exit_time ? substr($a->actual_exit_time, 0, 5) : '',
+                $a->stay_minutes ?? '',
+                $a->exit_notes,
                 $a->no_show_notes,
                 $a->reception_label,
                 $a->receptionReviewedBy?->name,
